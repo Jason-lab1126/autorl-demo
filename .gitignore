@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+
+# Hydra run dirs and console logs written during training/eval
+outputs/
+logs/console/
+
+# Never commit files over GitHub's comfortable size (none exist today; keep large artifacts out)
+*.zip
+*.tar
+*.tar.gz
+
+# Training runs: keep only selected checkpoints, the exported policy, configs, eval output and two videos
+logs/rsl_rl/**/model_*.pt
+!logs/rsl_rl/**/model_100.pt
+!logs/rsl_rl/**/model_300.pt
+!logs/rsl_rl/**/model_500.pt
+!logs/rsl_rl/**/model_1499.pt
+logs/rsl_rl/**/events.out.tfevents.*
+logs/rsl_rl/**/git/
+logs/rsl_rl/**/params/*.pkl
+logs/rsl_rl/**/videos/play/*
+!logs/rsl_rl/**/videos/play/closeup_1env_10s_clean.mp4
+!logs/rsl_rl/**/videos/play/play_16env_10s.mp4

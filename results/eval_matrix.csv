@@ -1,0 +1,17 @@
+perturbation,level,value,iter_100,iter_300,iter_500,iter_1499
+none,none,1,0,1,72,100
+cube_mass,x2,2,0,2,65,100
+cube_mass,x3,3,0,2,58,97
+cube_mass,x5,5,0,2,41,94
+cube_mass,x10,10,0,1,0,3
+friction,x0.5,0.5,0,4,72,99
+friction,x0.2,0.2,0,1,29,65
+friction,x0.1,0.1,0,0,0,2
+obs_noise,x1,1,0,1,54,97
+obs_noise,x2,2,0,1,30,65
+obs_noise,x3,3,0,0,8,28
+obs_noise,x5,5,0,0,0,1
+action_noise,medium,0.1,0,1,68,99
+action_noise,strong,0.5,0,1,39,80
+spawn_range,medium,1.5,0,3,65,99
+spawn_range,strong,2,0,0,60,83
