@@ -1,4 +1,4 @@
-# autorl-demo
+# From an RL teacher to a camera-only student: Franka cube lifting in Isaac Lab
 
 ![Teacher and camera-only student doing the same episode side by side](media/teacher_vs_student.gif)
 
@@ -9,6 +9,7 @@ What I found:
 - The arm learns fast. In 27 minutes of training it goes from 0% to 100% of attempts ending within 2 cm of the target, 0.3 cm away on average.
 - It breaks at specific points. A cube 5 times heavier is fine (94%) and one 10 times heavier is not (3%). Sensor noise wears it down steadily: 100, 97, 65, 28 and 1% as the noise goes from 0x to 1x, 2x, 3x and 5x.
 - A camera-only student can copy it. With 500 demonstrations it succeeds 44% of the time. With 1,250 it reaches 93%, against 100% for the teacher that is told where the cube is.
+- The camera-only student broke under any visual change: brighter light, a new table color or a camera moved 5 cm took it to 0%. Training on randomized visuals with a pretrained ResNet-18 recovered most of it, 53 to 81% under light and color changes, including ones never seen in training. Camera moves are still the weak point (16 to 46%).
 
 In the clip above both policies start from the same cube position and goal. The teacher ends 0.06 cm from the goal and the student 1.46 cm.
 
@@ -18,7 +19,7 @@ This is a first step toward generating robot training data with simulation and r
 
 ## What I built
 
-The lift task and the PPO training are stock Isaac Lab. I did not design the task, the rewards or the training algorithm. I built the evaluation (end-of-episode success under perturbations), the noise-training study, and the student pipeline (camera data, LeRobot export, behavior cloning, DAgger, closed-loop evaluation).
+The lift task and the PPO training are stock Isaac Lab. I did not design the task, the rewards or the training algorithm. I built the evaluation (end-of-episode success under perturbations), the noise-training study, and the student pipeline (camera data, LeRobot export, behavior cloning, DAgger, closed-loop evaluation, visual-change evaluation and visual randomization).
 
 ## Pipeline
 
@@ -30,7 +31,13 @@ flowchart LR
     A --> D["Camera demonstrations<br/>LeRobot dataset"]
     D --> S["Vision student<br/>BC, then DAgger"]
     S --> E["Closed-loop eval<br/>100 episodes"]
+    A --> R["Camera demonstrations<br/>randomized visuals"]
+    R --> V["Vision student<br/>ResNet-18"]
+    D --> V
+    V --> E
+    E --> W["Visual-change eval<br/>incl. held-out conditions"]
     E --> T
+    W --> T
 ```
 
 ## Part 1: the teacher
@@ -339,7 +346,7 @@ Reward weights: reaching the cube 1.0, lifting it more than 4 cm 15.0, goal trac
 - In the training curve, the dip around iteration 430 coincides with the curriculum raising the penalty weights. The noise-trained line drops at iteration 1500 because I resumed it there, which restarts the reward statistics and the curriculum (up to 140.7 at iteration 1640, down to 92.9 at iteration 1927). Values: [`results/training_curve.csv`](results/training_curve.csv).
 - The noise-trained policy's per-cell statistics are in [`results/obs_noise_dr/`](results/obs_noise_dr/) and [`results/obs_noise_dr_3000/`](results/obs_noise_dr_3000/).
 - The student camera is 1.1 m in front of the robot base, 0.7 m to the side and 0.7 m up, with goal markers off.
-- In the camera environment the teacher reproduces its original result (100%, 0.32 cm).
+- In the camera environment the teacher reproduces its original result (100%; 0.32 cm against 0.31 cm in Part 1, see the note under the student table).
 - On this server the LeRobot dataset has to be read with `video_backend="pyav"`.
 
 </details>
