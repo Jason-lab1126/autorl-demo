@@ -1,7 +1,7 @@
 """Compare policies on one perturbation sweep: success rate vs. level, one line per policy.
 
 Each policy is given as LABEL=RESULTS_DIR, where RESULTS_DIR holds an eval_matrix_cells.csv written
-by eval_lift.py. Append @ITER to pick a checkpoint other than --iter for that policy. Needs no
+by eval_lift.py. Error bars are 95% Wilson intervals. Append @ITER to pick a checkpoint other than --iter for that policy. Needs no
 simulator:
 
     python scripts/plot_compare.py --policies "Baseline=results" "Noise-trained=results/obs_noise_dr" \\
@@ -27,6 +27,15 @@ COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
 MARKERS = ["o", "s", "^", "D"]
 SURFACE, INK, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#e1e0d9", "#c3c2b7"
 
+
+def wilson_interval(successes: float, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a binomial proportion, as (low, high) fractions."""
+    p = successes / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / (1 + z * z / n)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--policies", type=str, nargs="+", required=True, help="LABEL=RESULTS_DIR[@ITER], one per policy.")
 parser.add_argument("--perturbation", type=str, default="obs_noise", choices=list(SWEEPS))
@@ -40,7 +49,8 @@ baseline_x, xlabel, title = SWEEPS[args.perturbation]
 fig, ax = plt.subplots(figsize=(7, 4.2), dpi=200, facecolor=SURFACE)
 ax.set_facecolor(SURFACE)
 num_episodes = None
-for policy, color, marker in zip(args.policies, COLORS, MARKERS):
+num_lines = len(args.policies)
+for index, (policy, color, marker) in enumerate(zip(args.policies, COLORS, MARKERS)):
     label, results_dir = policy.split("=", 1)
     results_dir, _, policy_iter = results_dir.partition("@")
     policy_iter = int(policy_iter) if policy_iter else args.iter
@@ -53,11 +63,20 @@ for policy, color, marker in zip(args.policies, COLORS, MARKERS):
     points.sort(key=lambda p: p[0])
     xs = [x for x, _ in points]
     ys = [100.0 * float(r["success_rate"]) for _, r in points]
-    num_episodes = points[0][1]["num_episodes"]
+    # 95% Wilson interval per point; lines are nudged apart sideways so overlapping bars stay readable
+    bounds = [wilson_interval(float(r["success_rate"]) * int(r["num_episodes"]), int(r["num_episodes"])) for _, r in points]
+    yerr = [[max(0.0, y - 100.0 * lo) for y, (lo, _) in zip(ys, bounds)], [max(0.0, 100.0 * hi - y) for y, (_, hi) in zip(ys, bounds)]]
+    dodge = (index - (num_lines - 1) / 2) * 0.008 * (max(xs) - min(xs))
+    plot_xs = [x + dodge for x in xs]
+    ax.errorbar(
+        plot_xs, ys, yerr=yerr, fmt="none", ecolor=color, elinewidth=1.2, capsize=3,
+        capthick=1.2, clip_on=False, zorder=2,
+    )
     ax.plot(
-        xs, ys, color=color, marker=marker, linewidth=2, markersize=7,
+        plot_xs, ys, color=color, marker=marker, linewidth=2, markersize=7,
         markeredgecolor=SURFACE, markeredgewidth=1.5, label=label, clip_on=False, zorder=3,
     )
+    num_episodes = points[0][1]["num_episodes"]
 ax.set_xticks(xs)
 ax.set_xticklabels([f"x{x:g}" for x in xs])
 ax.set_ylim(0, 100)
@@ -65,7 +84,7 @@ ax.set_yticks(range(0, 101, 20))
 ax.set_xlabel(xlabel, color=MUTED)
 ax.set_ylabel("Success rate [%]", color=MUTED)
 ax.set_title(
-    f"{title}\nfinal cube-to-goal distance < 2 cm, {num_episodes} episodes per point",
+    f"{title}\nfinal distance < 2 cm, {num_episodes} episodes per point, bars: 95% Wilson interval",
     color=INK, fontsize=11, loc="left",
 )
 ax.grid(axis="y", color=GRID, linewidth=0.8)
