@@ -62,7 +62,7 @@ import torch
 from rsl_rl.runners import OnPolicyRunner
 
 import vision_env
-from student_policy import StudentPolicy
+from student_policy import load_student
 from vision_env import ACTION_DIM, STATE_DIM, VisualRandomizer, cube_position, get_images, make_vision_env, student_state
 
 # Training palette for random colors: hue below this bound (red through blue). Hues from it up to 1
@@ -90,10 +90,7 @@ def main():
 
     student = None
     if args_cli.actor == "student":
-        checkpoint = torch.load(args_cli.student, map_location=device)
-        student = StudentPolicy(checkpoint["state_dim"], checkpoint["action_dim"]).to(device)
-        student.load_state_dict(checkpoint["model"])
-        student.eval()
+        student = load_student(args_cli.student, device)
 
     probing = args_cli.probe_steps > 0
     num_steps = args_cli.probe_steps if probing else args_cli.episodes_per_env * base_env.max_episode_length

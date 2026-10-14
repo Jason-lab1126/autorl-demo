@@ -47,7 +47,7 @@ import torch
 from rsl_rl.runners import OnPolicyRunner
 
 import vision_env
-from student_policy import StudentPolicy
+from student_policy import load_student
 from vision_env import cube_position, get_images, make_vision_env, student_state
 
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg
@@ -68,10 +68,7 @@ def main():
         teacher = runner.get_inference_policy(device=device)
         act = lambda obs: teacher(obs)  # noqa: E731
     else:
-        checkpoint = torch.load(args_cli.student, map_location=device)
-        student = StudentPolicy(checkpoint["state_dim"], checkpoint["action_dim"]).to(device)
-        student.load_state_dict(checkpoint["model"])
-        student.eval()
+        student = load_student(args_cli.student, device)
         act = lambda obs: student(get_images(base_env), student_state(obs))  # noqa: E731
 
     external, student_view, episode_ends = [], [], []

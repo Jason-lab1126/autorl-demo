@@ -15,5 +15,30 @@
     "original_cube": 250,
     "original_table": 251,
     "original_cube_and_table": 0
+  },
+  "resnet_attempt1": {
+    "old_data_val": 0.00838240523815155,
+    "best_val_mse": 0.010942840129307338,
+    "best_epoch": 18,
+    "epochs": 50,
+    "data": [
+      "datasets/lift_vision_teacher_visrand.h5",
+      "datasets/lift_vision_raw.h5"
+    ],
+    "num_episodes": 1751,
+    "train_seconds": 1498
+  },
+  "resnet_attempt2": {
+    "old_data_val": 0.0057348478078842165,
+    "best_val_mse": 0.008030028342723846,
+    "best_epoch": 24,
+    "epochs": 30,
+    "data": [
+      "datasets/lift_vision_teacher_visrand.h5",
+      "datasets/lift_vision_raw.h5",
+      "datasets/lift_vision_teacher_extra.h5"
+    ],
+    "num_episodes": 2501,
+    "train_seconds": 1286
   }
 }

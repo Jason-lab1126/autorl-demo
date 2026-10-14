@@ -156,31 +156,38 @@ More clips: [student close-up (mp4)](media/student_closeup_10s.mp4) · [teacher 
 
 I re-ran the best student and the teacher with changes that only affect what the camera sees: dimmer and brighter light, a different cube color, a different table color, and the camera moved sideways. Each cell is 100 episodes with the same seed and metric as before. Student cells show success, with mean final distance in brackets.
 
-| Change | Held out | Teacher | Student, fixed scene | Student, randomized visuals |
-|---|---|---|---|---|
-| None | no | 100% | 90% (3.34 cm) | 1% (40.88 cm) |
-| Light intensity x0.5 | no | 100% | 53% (7.72 cm) | 0% (40.98 cm) |
-| Light intensity x2 | no | 100% | 0% (41.15 cm) | 0% (41.12 cm) |
-| Cube color: flat red | no | 100% | 20% (28.80 cm) | 2% (40.61 cm) |
-| Table color: light wood | no | 100% | 0% (41.57 cm) | 1% (40.36 cm) |
-| Camera moved 5 cm sideways | no | 100% | 0% (43.09 cm) | 1% (40.29 cm) |
-| Camera moved 10 cm sideways | no | 100% | 0% (40.23 cm) | 2% (40.82 cm) |
-| Light intensity x3 | yes | 100% | 0% (41.40 cm) | 1% (41.14 cm) |
-| Cube color: purple | yes | 100% | 0% (40.49 cm) | 1% (40.64 cm) |
-| Table color: purple | yes | 100% | 0% (41.55 cm) | 0% (41.87 cm) |
-| Camera moved 12 cm sideways | yes | 100% | 0% (40.56 cm) | 0% (40.86 cm) |
+| Change | Held out | Teacher | Student, fixed scene | Randomized, small CNN | Randomized, ResNet-18 |
+|---|---|---|---|---|---|
+| None | no | 100% | 90% (3.34 cm) | 1% (40.88 cm) | 86% (2.56 cm) |
+| Light intensity x0.5 | no | 100% | 53% (7.72 cm) | 0% (40.98 cm) | 78% (5.34 cm) |
+| Light intensity x2 | no | 100% | 0% (41.15 cm) | 0% (41.12 cm) | 81% (5.91 cm) |
+| Cube color: flat red | no | 100% | 20% (28.80 cm) | 2% (40.61 cm) | 62% (8.06 cm) |
+| Table color: light wood | no | 100% | 0% (41.57 cm) | 1% (40.36 cm) | 63% (13.42 cm) |
+| Camera moved 5 cm sideways | no | 100% | 0% (43.09 cm) | 1% (40.29 cm) | 46% (19.57 cm) |
+| Camera moved 10 cm sideways | no | 100% | 0% (40.23 cm) | 2% (40.82 cm) | 22% (32.28 cm) |
+| Light intensity x3 | yes | 100% | 0% (41.40 cm) | 1% (41.14 cm) | 79% (8.17 cm) |
+| Cube color: purple | yes | 100% | 0% (40.49 cm) | 1% (40.64 cm) | 62% (8.37 cm) |
+| Table color: purple | yes | 100% | 0% (41.55 cm) | 0% (41.87 cm) | 53% (15.70 cm) |
+| Camera moved 12 cm sideways | yes | 100% | 0% (40.56 cm) | 0% (40.86 cm) | 16% (34.43 cm) |
 
 ![What the student sees in each condition, in the order of the table](results/visual_student_views.png)
 
 The teacher ignores all of these, because it never looks at the image. The first student depends on them completely. A brighter light, a lighter table or a camera moved by 5 cm takes it from 90% to 0%, and it mostly stops lifting the cube at all. A camera-based policy trained on one fixed scene is not ready for a real robot.
 
-To fix this I collected 1,251 new teacher episodes with the visuals randomized per episode: light intensity from x0.5 to x2, random cube and table colors (hues from red to blue, so purple and magenta stay unseen), and the camera moved in a random direction by up to 10 cm. One environment in five kept the original cube and another one in five the original table. I trained a new student on it with the same model and settings. The "held out" rows are outside those ranges.
+To fix this I collected 1,251 new teacher episodes with the visuals randomized per episode: light intensity from x0.5 to x2, random cube and table colors (hues from red to blue, so purple and magenta stay unseen), and the camera moved in a random direction by up to 10 cm. One environment in five kept the original cube and another one in five the original table. The "held out" rows are outside those ranges.
 
-It did not work. The randomized student fails everywhere, including on the unchanged scene (1%), and it is no better on the held-out conditions. As far as I can tell this is not an evaluation bug: the training images look right, and the eval images match them. The student is underfitting. Its error on its own training data is 2.7 to 3.1 times the first student's, and on the original unchanged data it is 3.0 times worse. Randomized visuals make the task harder to learn, and this small model with 20 epochs is not enough for it. One design choice may also hurt the unchanged row: no training episode had the original cube and the original table together.
+With the same small CNN and 20 epochs this did not work. That student fails everywhere, including on the unchanged scene (1%). It was underfitting: its error on its own training data was about 3 times the first student's.
 
-Next I would try a larger image encoder, longer training and image augmentation, and only re-run the held-out rows once the unchanged scene is back near 90%.
+I then made two attempts with a larger model:
 
-The 90% in the first row and the 93% in the student table above are two separate runs of the same 100 episodes, which do not reproduce exactly. Per-run results are in [`results/visual/`](results/visual/), the table in [`results/visual_robustness.md`](results/visual_robustness.md) and the fit numbers in [`results/visual_rand_diagnostics.json`](results/visual_rand_diagnostics.json).
+1. An ImageNet-pretrained ResNet-18, fine-tuned, with random 76x76 crops of the 84x84 image during training and the center crop at test time. Up to 50 epochs, keeping the checkpoint with the lowest validation loss. I added the 500 original fixed-scene episodes to the randomized ones. This reached 58% on the unchanged scene, so I did not run the other conditions.
+2. The same model, with all 1,250 fixed-scene episodes the first student was trained on plus the 1,251 randomized ones, for 30 epochs. This reached 86% on the unchanged scene, close to the first student's 90%, so I ran the full table. That is the last column.
+
+My take: visual randomization works once the model is big enough to absorb it, and it costs little on the original scene. Light and color changes went from mostly 0% to between 53% and 81%, including changes it never saw in training (light x3, purple cube, purple table). Moving the camera is still the weak point: 46% at 5 cm, 22% at 10 cm and 16% at 12 cm, even though offsets up to 10 cm were in the training data. The policy has to turn image positions into arm motions, and a moved camera changes that mapping, not just how things look. For a real robot I would fix the camera mount carefully or give the student a second view, rather than count on randomization alone.
+
+Caveats: each column is one training run with one seed and 100 episodes per cell. The last student also saw more original-scene data than the failed attempts, so I cannot say how much of the gain comes from the model and how much from the data.
+
+The 90% in the first row and the 93% in the student table above are two separate runs of the same 100 episodes, which do not reproduce exactly. Per-run results are in [`results/visual/`](results/visual/), the table in [`results/visual_robustness.md`](results/visual_robustness.md) and the fit numbers for all three randomized students in [`results/visual_rand_diagnostics.json`](results/visual_rand_diagnostics.json).
 
 ## Limitations
 
@@ -191,7 +198,7 @@ The 90% in the first row and the 93% in the student table above are two separate
 
 ## Next steps
 
-- Make visual randomization work: a larger image encoder, longer training and image augmentation, then re-run the visual table.
+- Make the student robust to camera moves: a second camera, or randomizing the camera pose more widely.
 - Fine-tune a vision-language-action model such as SmolVLA on the LeRobot dataset.
 - Move to harder tasks like stacking, with a language model proposing the reward functions and this evaluation scoring them.
 
@@ -282,8 +289,13 @@ python scripts/export_lerobot.py --raw datasets/lift_vision_raw.h5 --root datase
 # visual changes: best student and teacher, 7 conditions
 ./scripts/run_visual_eval.sh
 
-# randomized-visuals data, training and the held-out conditions
+# randomized-visuals data, training (small CNN) and the held-out conditions
 ./scripts/run_visual_randomization.sh
+
+# ResNet-18 students on the randomized data; see the script header for attempts 1 and 2
+FULL=1 NAME=student_visual_rand_resnet2 TRAIN_ARGS="--encoder resnet18 --crop 76 --epochs 30 --lr 1e-3 --encoder_lr 1e-4 --amp" \
+    DATA="datasets/lift_vision_teacher_visrand.h5 datasets/lift_vision_raw.h5 datasets/lift_vision_teacher_extra.h5" \
+    ./scripts/run_visual_rand_resnet.sh
 
 # record a student rollout
 python scripts/record_student_video.py --policy student --student logs/student/bc_more_teacher/student.pt \

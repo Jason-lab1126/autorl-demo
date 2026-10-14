@@ -28,6 +28,10 @@ parser.add_argument("--batch_size", type=int, default=256)
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--weight_decay", type=float, default=1e-4)
 parser.add_argument("--seed", type=int, default=0)
+parser.add_argument("--encoder", type=str, default="cnn", choices=["cnn", "resnet18"], help="resnet18 starts from ImageNet weights.")
+parser.add_argument("--crop", type=int, default=0, help="Random crop size during training (center crop at test time); 0 = none.")
+parser.add_argument("--encoder_lr", type=float, default=None, help="Learning rate of the image encoder (default: --lr).")
+parser.add_argument("--amp", action="store_true", help="bfloat16 autocast for speed.")
 parser.add_argument("--device", type=str, default="cuda:0")
 args = parser.parse_args()
 
@@ -57,11 +61,14 @@ def image_batch(ids: torch.Tensor) -> torch.Tensor:
 
 print(f"[train_student] {len(train_ids)} train frames, {len(val_ids)} validation frames")
 
-model = StudentPolicy(states.shape[1], actions.shape[1]).to(device)
+model = StudentPolicy(states.shape[1], actions.shape[1], encoder=args.encoder, crop=args.crop).to(device)
 model.set_normalization(states[train_ids], actions[train_ids])
 steps_per_epoch = len(train_ids) // args.batch_size
-optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=args.lr, total_steps=args.epochs * steps_per_epoch, pct_start=0.05)
+encoder_params = list(model.encoder.parameters())
+other_params = [p for name, p in model.named_parameters() if not name.startswith("encoder.")]
+learning_rates = [args.encoder_lr or args.lr, args.lr]
+optimizer = torch.optim.AdamW([{"params": encoder_params}, {"params": other_params}], lr=args.lr, weight_decay=args.weight_decay)
+scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=learning_rates, total_steps=args.epochs * steps_per_epoch, pct_start=0.05)
 
 
 def evaluate(ids: torch.Tensor) -> tuple[float, float]:
@@ -70,7 +77,8 @@ def evaluate(ids: torch.Tensor) -> tuple[float, float]:
     normalized, raw = 0.0, 0.0
     with torch.no_grad():
         for batch in ids.split(1024):
-            prediction = model.forward_normalized(image_batch(batch), states[batch])
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
+                prediction = model.forward_normalized(image_batch(batch), states[batch]).float()
             target = model.normalize_action(actions[batch])
             normalized += ((prediction - target) ** 2).mean(1).sum().item()
             raw += (((prediction - target) * model.action_std) ** 2).mean(1).sum().item()
@@ -82,7 +90,9 @@ rows, best_val, start = [], float("inf"), time.time()
 for epoch in range(1, args.epochs + 1):
     running = 0.0
     for batch in train_ids[torch.randperm(len(train_ids), device=device)][: steps_per_epoch * args.batch_size].split(args.batch_size):
-        loss = ((model.forward_normalized(image_batch(batch), states[batch]) - model.normalize_action(actions[batch])) ** 2).mean()
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
+            prediction = model.forward_normalized(image_batch(batch), states[batch]).float()
+        loss = ((prediction - model.normalize_action(actions[batch])) ** 2).mean()
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
@@ -92,7 +102,7 @@ for epoch in range(1, args.epochs + 1):
     rows.append({"epoch": epoch, "train_mse": running / steps_per_epoch, "val_mse": val_mse, "val_mse_raw_action": val_mse_raw})
     if val_mse < best_val:
         best_val = val_mse
-        torch.save({"model": model.state_dict(), "state_dim": states.shape[1], "action_dim": actions.shape[1], "epoch": epoch, "val_mse": val_mse}, os.path.join(args.out, "student.pt"))
+        torch.save({"model": model.state_dict(), "state_dim": states.shape[1], "action_dim": actions.shape[1], "epoch": epoch, "val_mse": val_mse, "encoder": args.encoder, "crop": args.crop}, os.path.join(args.out, "student.pt"))
     print(f"[train_student] epoch {epoch:3d}  train {rows[-1]['train_mse']:.4f}  val {val_mse:.4f}  val (raw action) {val_mse_raw:.4f}  ({time.time() - start:.0f}s)", flush=True)
 
 with open(os.path.join(args.out, "training_log.csv"), "w", newline="") as f:

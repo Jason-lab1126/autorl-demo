@@ -1,0 +1,22 @@
+{
+  "data": [
+    "datasets/lift_vision_teacher_visrand.h5",
+    "datasets/lift_vision_raw.h5"
+  ],
+  "out": "logs/student/visual_rand_resnet",
+  "epochs": 50,
+  "batch_size": 256,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "seed": 0,
+  "encoder": "resnet18",
+  "crop": 76,
+  "encoder_lr": 0.0001,
+  "amp": true,
+  "device": "cuda:0",
+  "num_episodes": 1751,
+  "train_frames": 393750,
+  "val_frames": 43750,
+  "best_val_mse": 0.010942840129307338,
+  "train_seconds": 1497.9535057544708
+}

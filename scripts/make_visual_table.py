@@ -27,7 +27,12 @@ CONDITIONS = [
     ("table_purple", "Table color: purple", True),
     ("camera_12cm", "Camera moved 12 cm sideways", True),
 ]
-POLICIES = [("teacher", "Teacher"), ("student", "Student, fixed scene"), ("student_visual_rand", "Student, randomized visuals")]
+POLICIES = [
+    ("teacher", "Teacher"),
+    ("student", "Student, fixed scene"),
+    ("student_visual_rand", "Student, randomized, small CNN"),
+    ("student_visual_rand_resnet2", "Student, randomized, ResNet-18"),
+]
 HEADER = ["Change", "Held out"] + [f"{label} success" for _, label in POLICIES] + [f"{label} mean distance [cm]" for _, label in POLICIES[1:]]
 
 
