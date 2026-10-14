@@ -1,0 +1,19 @@
+{
+  "note": "Mean squared error on normalized actions (the training loss), on 50 episodes per group. 'Old data' is the original 500-episode fixed-scene dataset.",
+  "randomized_student": {
+    "train_original_cube": 0.01785941925048828,
+    "train_original_table": 0.016067329864501954,
+    "train_both_recolored": 0.01572267608642578,
+    "old_data_val": 0.019596283264160155
+  },
+  "fixed_scene_student": {
+    "old_data_train": 0.005847015075683594,
+    "old_data_val": 0.0064515301513671875
+  },
+  "randomized_dataset": {
+    "episodes": 1251,
+    "original_cube": 250,
+    "original_table": 251,
+    "original_cube_and_table": 0
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "data": [
+    "datasets/lift_vision_teacher_visrand.h5"
+  ],
+  "out": "logs/student/bc_visual_rand",
+  "epochs": 20,
+  "batch_size": 256,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "seed": 0,
+  "device": "cuda:0",
+  "num_episodes": 1251,
+  "train_frames": 281250,
+  "val_frames": 31250,
+  "best_val_mse": 0.023256787628173826,
+  "train_seconds": 591.1736514568329
+}

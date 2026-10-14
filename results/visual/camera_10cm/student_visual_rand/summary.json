@@ -1,0 +1,23 @@
+{
+  "policy": "student",
+  "checkpoint": "/home/zxu27/autorl-demo/logs/student/bc_visual_rand/student.pt",
+  "task": "Isaac-Lift-Cube-Franka-Play-v0",
+  "num_episodes": 100,
+  "threshold_m": 0.02,
+  "success_rate": 0.019999999552965164,
+  "final_dist_mean_m": 0.40824997425079346,
+  "final_dist_median_m": 0.4153413772583008,
+  "final_dist_max_m": 0.6579898595809937,
+  "success_rate_5cm": 0.019999999552965164,
+  "lifted_rate": 0.019999999552965164,
+  "dropped_rate": 0.0,
+  "seed": 0,
+  "light_scale": 1.0,
+  "cube_color": null,
+  "table_color": null,
+  "camera_shift_m": [
+    0.0,
+    0.1,
+    0.0
+  ]
+}

@@ -35,6 +35,10 @@ STATE_NAMES = (
 STATE_DIM = len(STATE_NAMES)
 ACTION_DIM = 8
 
+# with randomizable=True, environments whose index modulo 5 equals these keep the original cube/table look
+KEEP_ORIGINAL_CUBE = 0
+KEEP_ORIGINAL_TABLE = 2
+
 
 def make_vision_env(
     num_envs: int,
@@ -51,6 +55,7 @@ def make_vision_env(
     cube_color: tuple | None = None,
     table_color: tuple | None = None,
     camera_shift: tuple = (0.0, 0.0, 0.0),
+    randomizable: bool = False,
 ):
     """Creates the lift-cube environment (wrapped for rsl_rl) with a camera added to every environment.
 
@@ -61,6 +66,10 @@ def make_vision_env(
     ``light_scale`` multiplies the scene light's intensity, ``cube_color`` and ``table_color`` replace
     the cube's and table's materials with one flat RGB color, and ``camera_shift`` moves the student's
     camera (eye and look-at point together) by that offset in meters.
+
+    ``randomizable`` prepares the cube and table for per-environment recoloring at runtime (see
+    :class:`VisualRandomizer`): every environment except one in five gets its own cube material, and
+    likewise for the table (a different one in five), all bound before the simulation starts.
     """
     env_cfg = parse_env_cfg(TASK, device=device, num_envs=num_envs)
     env_cfg.seed = seed
@@ -70,6 +79,9 @@ def make_vision_env(
     env_cfg.commands.object_pose.debug_vis = False
     env_cfg.scene.ee_frame.debug_vis = False
     env_cfg.scene.light.spawn.intensity *= light_scale
+    if randomizable:
+        env_cfg.scene.object.spawn.func = _spawn_uninstanced(env_cfg.scene.object.spawn.func)
+        env_cfg.scene.table.spawn.func = _spawn_uninstanced(env_cfg.scene.table.spawn.func)
     if cube_color is not None:
         env_cfg.scene.object.spawn.func = _spawn_with_flat_color(env_cfg.scene.object.spawn.func, "cube", cube_color)
     if table_color is not None:
@@ -88,7 +100,22 @@ def make_vision_env(
         env_cfg.viewer.env_index = viewer_env_index
         env_cfg.viewer.eye = tuple(viewer_eye)
         env_cfg.viewer.lookat = tuple(viewer_lookat)
-    env = RslRlVecEnvWrapper(gym.make(TASK, cfg=env_cfg, render_mode="rgb_array" if viewer_eye is not None else None))
+    if randomizable:
+        # bind the per-environment materials once the scene is cloned, before the simulation starts
+        from isaaclab.scene import InteractiveScene
+
+        original_scene_init = InteractiveScene.__init__
+
+        def scene_init(scene, cfg):
+            original_scene_init(scene, cfg)
+            _bind_random_materials(scene.num_envs)
+
+        InteractiveScene.__init__ = scene_init
+    try:
+        env = RslRlVecEnvWrapper(gym.make(TASK, cfg=env_cfg, render_mode="rgb_array" if viewer_eye is not None else None))
+    finally:
+        if randomizable:
+            InteractiveScene.__init__ = original_scene_init
     base_env = env.unwrapped
 
     terms = base_env.observation_manager.active_terms["policy"]
@@ -105,6 +132,18 @@ def make_vision_env(
     return env
 
 
+def _uninstance(root):
+    """Makes every instanceable prim under ``root`` editable, so a material bound on top applies."""
+    from pxr import Usd
+
+    while True:
+        instanced = [p for p in Usd.PrimRange(root) if p.IsInstanceable()]
+        if not instanced:
+            return
+        for p in instanced:
+            p.SetInstanceable(False)
+
+
 def _spawn_with_flat_color(spawn_func, name: str, color: tuple):
     """Wraps a USD spawner so the spawned asset is drawn in one flat color.
 
@@ -113,7 +152,6 @@ def _spawn_with_flat_color(spawn_func, name: str, color: tuple):
     descendants. This happens before the simulation starts, and changes nothing about the physics.
     """
     import omni.usd
-    from pxr import Usd
 
     def spawn(prim_path, cfg, *args, **kwargs):
         prim = spawn_func(prim_path, cfg, *args, **kwargs)
@@ -123,16 +161,99 @@ def _spawn_with_flat_color(spawn_func, name: str, color: tuple):
             material_cfg = sim_utils.PreviewSurfaceCfg(diffuse_color=tuple(color))
             material_cfg.func(material_path, material_cfg)
         for root in sim_utils.find_matching_prims(prim_path):
-            while True:
-                instanced = [p for p in Usd.PrimRange(root) if p.IsInstanceable()]
-                if not instanced:
-                    break
-                for p in instanced:
-                    p.SetInstanceable(False)
+            _uninstance(root)
             sim_utils.bind_visual_material(root.GetPath().pathString, material_path, stronger_than_descendants=True)
         return prim
 
     return spawn
+
+
+def _spawn_uninstanced(spawn_func):
+    """Wraps a USD spawner so the spawned asset is made non-instanceable (its look is unchanged)."""
+
+    def spawn(prim_path, cfg, *args, **kwargs):
+        prim = spawn_func(prim_path, cfg, *args, **kwargs)
+        for root in sim_utils.find_matching_prims(prim_path):
+            _uninstance(root)
+        return prim
+
+    return spawn
+
+
+def _bind_random_materials(num_envs: int):
+    """Gives each environment's cube and table its own recolorable material.
+
+    Runs after the scene has been cloned (at spawn time only environment 0 exists) and before the
+    simulation starts: binding a material changes the rigid body's prim, which PhysX cannot take
+    once it runs. Environments whose index modulo 5 equals KEEP_ORIGINAL_CUBE / KEEP_ORIGINAL_TABLE
+    get no material for that asset and keep its original look.
+    """
+    import omni.usd
+    from pxr import UsdShade
+
+    stage = omni.usd.get_context().get_stage()
+    for asset, name, keep_original in (("Object", "object", KEEP_ORIGINAL_CUBE), ("Table", "table", KEEP_ORIGINAL_TABLE)):
+        for i in range(num_envs):
+            if i % 5 == keep_original:
+                # the cloned environments inherit from environment 0, including its material binding,
+                # so an explicitly empty binding is needed to keep the original look
+                UsdShade.MaterialBindingAPI.Apply(stage.GetPrimAtPath(f"/World/envs/env_{i}/{asset}")).UnbindDirectBinding()
+                continue
+            material_path = f"/World/Looks/random_{name}_{i}"
+            material_cfg = sim_utils.PreviewSurfaceCfg(diffuse_color=(0.5, 0.5, 0.5))
+            material_cfg.func(material_path, material_cfg)
+            sim_utils.bind_visual_material(f"/World/envs/env_{i}/{asset}", material_path, stronger_than_descendants=True)
+
+
+class VisualRandomizer:
+    """Changes what the camera sees between episodes, per environment, without touching the physics.
+
+    Needs an environment made with ``make_vision_env(..., randomizable=True)``. At runtime it only
+    changes values: the shared scene light's intensity (one value per call), each environment's cube
+    and table color, and each environment's camera offset. Environments that keep the original cube
+    or table look (see KEEP_ORIGINAL_CUBE/TABLE) ignore the colors given for them.
+    """
+
+    def __init__(self, base_env, eye: tuple = CAMERA_EYE, lookat: tuple = CAMERA_LOOKAT):
+        import omni.usd
+        from pxr import UsdShade
+
+        self.base_env = base_env
+        self.stage = omni.usd.get_context().get_stage()
+        self.num_envs = base_env.num_envs
+        self.light = self.stage.GetPrimAtPath("/World/light").GetAttribute("inputs:intensity")
+        if not self.light.IsValid():
+            raise RuntimeError("Could not find the intensity of /World/light.")
+        self.base_intensity = self.light.Get()
+        origins = base_env.scene.env_origins
+        self.eyes = origins + torch.tensor(eye, device=origins.device)
+        self.targets = origins + torch.tensor(lookat, device=origins.device)
+
+        self.inputs = {}
+        for name in ("object", "table"):
+            for i in range(self.num_envs):
+                material = self.stage.GetPrimAtPath(f"/World/Looks/random_{name}_{i}")
+                if not material.IsValid():
+                    continue
+                shaders = [UsdShade.Shader(p) for p in material.GetChildren() if p.IsA(UsdShade.Shader)]
+                self.inputs[name, i] = shaders[0].GetInput("diffuseColor")
+        if not self.inputs:
+            raise RuntimeError("No recolorable materials found; was the env made with randomizable=True?")
+
+    def recolorable(self, name: str, i: int) -> bool:
+        return (name, i) in self.inputs
+
+    def apply(self, light_scale: float, cube_colors: list, table_colors: list, camera_shifts: torch.Tensor):
+        """light_scale: one float; cube_colors/table_colors: per-env RGB; camera_shifts: (num_envs, 3) [m]."""
+        from pxr import Gf
+
+        self.light.Set(float(self.base_intensity * light_scale))
+        for name, colors in (("object", cube_colors), ("table", table_colors)):
+            for i in range(self.num_envs):
+                if self.recolorable(name, i):
+                    self.inputs[name, i].Set(Gf.Vec3f(*[float(c) for c in colors[i]]))
+        shifts = camera_shifts.to(self.eyes.device)
+        self.base_env.scene["camera"].set_world_poses_from_view(self.eyes + shifts, self.targets + shifts)
 
 
 def get_images(base_env) -> torch.Tensor:

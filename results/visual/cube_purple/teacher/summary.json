@@ -1,0 +1,27 @@
+{
+  "policy": "teacher",
+  "checkpoint": "/home/zxu27/autorl-demo/logs/rsl_rl/franka_lift/2026-10-13_15-19-32_ppo_baseline/model_1499.pt",
+  "task": "Isaac-Lift-Cube-Franka-Play-v0",
+  "num_episodes": 100,
+  "threshold_m": 0.02,
+  "success_rate": 1.0,
+  "final_dist_mean_m": 0.0031877332367002964,
+  "final_dist_median_m": 0.003005272476002574,
+  "final_dist_max_m": 0.011170853860676289,
+  "success_rate_5cm": 1.0,
+  "lifted_rate": 1.0,
+  "dropped_rate": 0.0,
+  "seed": 0,
+  "light_scale": 1.0,
+  "cube_color": [
+    0.6,
+    0.1,
+    0.8
+  ],
+  "table_color": null,
+  "camera_shift_m": [
+    0.0,
+    0.0,
+    0.0
+  ]
+}

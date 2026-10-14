@@ -5,6 +5,11 @@ executed, for state diversity, but the teacher's clean action is what gets recor
 
 With --actor student (DAgger), the vision student drives the robot instead, and the teacher only
 labels the states the student visits.
+
+With --randomize, every round of episodes gets new visuals: one light intensity for the round
+(log-uniform in --light_range), and per environment a random cube color and table color from the
+training palette and a camera offset in a random direction with length up to --max_camera_shift.
+One environment in five keeps the original cube look, and another one in five the original table.
 Every step stores the camera image, the student's state input, the clean action and (never used
 by the student) the cube position. Output is one lossless HDF5 file; export_lerobot.py converts it
 to a LeRobot dataset.
@@ -37,6 +42,9 @@ parser.add_argument("--student", type=str, default=None, help="Student checkpoin
 parser.add_argument("--val_fraction", type=float, default=0.1, help="Fraction of episodes held out for validation.")
 parser.add_argument("--seed", type=int, default=1)
 parser.add_argument("--probe_steps", type=int, default=0, help="Only time this many steps and save sample images.")
+parser.add_argument("--randomize", action="store_true", help="Randomize lighting, colors and camera per episode.")
+parser.add_argument("--light_range", type=float, nargs=2, default=[0.5, 2.0])
+parser.add_argument("--max_camera_shift", type=float, default=0.10, help="[m]")
 parser.add_argument("--probe_dir", type=str, default="probe")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
@@ -55,14 +63,24 @@ from rsl_rl.runners import OnPolicyRunner
 
 import vision_env
 from student_policy import StudentPolicy
-from vision_env import ACTION_DIM, STATE_DIM, cube_position, get_images, make_vision_env, student_state
+from vision_env import ACTION_DIM, STATE_DIM, VisualRandomizer, cube_position, get_images, make_vision_env, student_state
+
+# Training palette for random colors: hue below this bound (red through blue). Hues from it up to 1
+# (purple, magenta) are never used in training, so they can serve as held-out colors.
+TRAIN_MAX_HUE = 0.7
+
+
+def sample_color(rng) -> tuple:
+    import colorsys
+
+    return colorsys.hsv_to_rgb(rng.uniform(0.0, TRAIN_MAX_HUE), rng.uniform(0.0, 1.0), rng.uniform(0.15, 1.0))
 
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg
 
 
 def main():
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(vision_env.TASK, args_cli)
-    env = make_vision_env(args_cli.num_envs, args_cli.device, args_cli.seed, image_size=args_cli.image_size)
+    env = make_vision_env(args_cli.num_envs, args_cli.device, args_cli.seed, image_size=args_cli.image_size, randomizable=args_cli.randomize)
     base_env = env.unwrapped
     num_envs, device = base_env.num_envs, base_env.device
 
@@ -88,10 +106,41 @@ def main():
     goal_dist = torch.zeros(num_steps, num_envs)
     dones = torch.zeros(num_steps, num_envs, dtype=torch.bool)
 
+    import numpy as np
+
+    rng = np.random.default_rng(args_cli.seed)
+    randomizer = VisualRandomizer(base_env) if args_cli.randomize else None
+    episode_length = base_env.max_episode_length
+    # visuals used in each round, per environment (NaN color = original look)
+    num_rounds = -(-num_steps // episode_length)
+    round_light = np.ones(num_rounds, dtype=np.float32)
+    round_cube = np.full((num_rounds, num_envs, 3), np.nan, dtype=np.float32)
+    round_table = np.full((num_rounds, num_envs, 3), np.nan, dtype=np.float32)
+    round_shift = np.zeros((num_rounds, num_envs, 3), dtype=np.float32)
+
     obs, _ = env.get_observations()
     start = time.time()
     with torch.inference_mode():
         for t in range(num_steps):
+            if randomizer is not None and t % episode_length == 0:
+                r = t // episode_length
+                round_light[r] = np.exp(rng.uniform(*np.log(args_cli.light_range)))
+                cubes = [sample_color(rng) for _ in range(num_envs)]
+                tables = [sample_color(rng) for _ in range(num_envs)]
+                directions = rng.normal(size=(num_envs, 3))
+                directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+                round_shift[r] = directions * rng.uniform(0.0, args_cli.max_camera_shift, size=(num_envs, 1))
+                for i in range(num_envs):
+                    if randomizer.recolorable("object", i):
+                        round_cube[r, i] = cubes[i]
+                    if randomizer.recolorable("table", i):
+                        round_table[r, i] = tables[i]
+                randomizer.apply(float(round_light[r]), cubes, tables, torch.from_numpy(round_shift[r]))
+                if t > 0:
+                    # every environment starts a fresh episode under the new visuals
+                    dones[t - 1] = True
+                base_env.reset()
+                obs, _ = env.get_observations()
             clean_action = teacher(obs)
             image = get_images(base_env)
             driver_action = clean_action if student is None else student(image, student_state(obs))
@@ -113,8 +162,11 @@ def main():
     if probing:
         import imageio.v2 as imageio
 
+        if randomizer is not None:
+            print(f"[collect] PROBE: round light scales {round_light.round(2).tolist()}")
+
         os.makedirs(args_cli.probe_dir, exist_ok=True)
-        for t in sorted({0, num_steps // 2, num_steps - 1}):
+        for t in sorted({0, num_steps // 2, num_steps - 1} | ({episode_length, episode_length + 5} if num_steps > episode_length + 5 else set())):
             strip = torch.cat([images[t, i] for i in range(min(4, num_envs))], dim=1).numpy()
             imageio.imwrite(os.path.join(args_cli.probe_dir, f"step_{t:03d}.png"), strip)
         full_steps = args_cli.episodes_per_env * base_env.max_episode_length
@@ -123,11 +175,12 @@ def main():
         env.close()
         return
 
-    write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones)
+    write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones,
+                  (round_light, round_cube, round_table, round_shift) if randomizer is not None else None)
     env.close()
 
 
-def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones):
+def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones, visuals=None):
     import h5py
     import numpy as np
 
@@ -172,6 +225,15 @@ def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones)
         f.create_dataset("episode_is_val", data=is_val)
         # cube-to-goal distance at the last recorded frame of the episode (one step before it ends)
         f.create_dataset("episode_last_frame_dist", data=final_dist)
+        if visuals is not None:
+            # the visuals each episode was recorded under (cube/table color NaN = original look)
+            light, cube, table, shift = visuals
+            rounds = [begin // 250 for _, begin, _ in spans]
+            envs = [env_id for env_id, _, _ in spans]
+            f.create_dataset("episode_light_scale", data=light[rounds])
+            f.create_dataset("episode_cube_color", data=cube[rounds, envs])
+            f.create_dataset("episode_table_color", data=table[rounds, envs])
+            f.create_dataset("episode_camera_shift", data=shift[rounds, envs])
         f.attrs.update({
             "task": vision_env.TASK,
             "instruction": vision_env.INSTRUCTION,
@@ -185,6 +247,11 @@ def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones)
             "camera_lookat": vision_env.CAMERA_LOOKAT,
             "camera_focal_length": vision_env.CAMERA_FOCAL_LENGTH,
             "seed": args_cli.seed,
+            "randomized_visuals": bool(visuals is not None),
+            "light_range": args_cli.light_range,
+            "max_camera_shift_m": args_cli.max_camera_shift,
+            "keep_original": "env index % 5 == 0 keeps the original cube, == 2 the original table",
+            "train_max_hue": TRAIN_MAX_HUE,
         })
     print(
         f"[collect] wrote {args_cli.out}: {len(spans)} episodes ({int(is_val.sum())} val), {total} frames,"

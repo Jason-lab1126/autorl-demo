@@ -154,23 +154,33 @@ More clips: [student close-up (mp4)](media/student_closeup_10s.mp4) · [teacher 
 
 ### What the student depends on
 
-I re-ran the best student and the teacher with changes that only affect what the camera sees: dimmer and brighter light, a different cube color, a different table color, and the camera moved sideways. Nothing was retrained. Each cell is 100 episodes with the same seed and metric as before.
+I re-ran the best student and the teacher with changes that only affect what the camera sees: dimmer and brighter light, a different cube color, a different table color, and the camera moved sideways. Each cell is 100 episodes with the same seed and metric as before. Student cells show success, with mean final distance in brackets.
 
-| Change | Teacher success | Student success | Student mean final distance |
-|---|---|---|---|
-| None | 100% | 90% | 3.34 cm |
-| Light intensity x0.5 | 100% | 53% | 7.72 cm |
-| Light intensity x2 | 100% | 0% | 41.15 cm |
-| Cube color: flat red | 100% | 20% | 28.80 cm |
-| Table color: light wood | 100% | 0% | 41.57 cm |
-| Camera moved 5 cm sideways | 100% | 0% | 43.09 cm |
-| Camera moved 10 cm sideways | 100% | 0% | 40.23 cm |
+| Change | Held out | Teacher | Student, fixed scene | Student, randomized visuals |
+|---|---|---|---|---|
+| None | no | 100% | 90% (3.34 cm) | 1% (40.88 cm) |
+| Light intensity x0.5 | no | 100% | 53% (7.72 cm) | 0% (40.98 cm) |
+| Light intensity x2 | no | 100% | 0% (41.15 cm) | 0% (41.12 cm) |
+| Cube color: flat red | no | 100% | 20% (28.80 cm) | 2% (40.61 cm) |
+| Table color: light wood | no | 100% | 0% (41.57 cm) | 1% (40.36 cm) |
+| Camera moved 5 cm sideways | no | 100% | 0% (43.09 cm) | 1% (40.29 cm) |
+| Camera moved 10 cm sideways | no | 100% | 0% (40.23 cm) | 2% (40.82 cm) |
+| Light intensity x3 | yes | 100% | 0% (41.40 cm) | 1% (41.14 cm) |
+| Cube color: purple | yes | 100% | 0% (40.49 cm) | 1% (40.64 cm) |
+| Table color: purple | yes | 100% | 0% (41.55 cm) | 0% (41.87 cm) |
+| Camera moved 12 cm sideways | yes | 100% | 0% (40.56 cm) | 0% (40.86 cm) |
 
 ![What the student sees in each condition, in the order of the table](results/visual_student_views.png)
 
-The teacher ignores all of these, because it never looks at the image. The student depends on them completely. A brighter light, a lighter table or a camera moved by 5 cm takes it from 90% to 0%, and it mostly stops lifting the cube at all. That is why a camera-based policy trained on one fixed scene is not ready for a real robot: it needs randomized lighting, colors and camera poses in training first.
+The teacher ignores all of these, because it never looks at the image. The first student depends on them completely. A brighter light, a lighter table or a camera moved by 5 cm takes it from 90% to 0%, and it mostly stops lifting the cube at all. A camera-based policy trained on one fixed scene is not ready for a real robot.
 
-The 90% in the first row and the 93% in the student table above are two separate runs of the same 100 episodes, which do not reproduce exactly. All per-run results are in [`results/visual/`](results/visual/) and the table in [`results/visual_robustness.md`](results/visual_robustness.md).
+To fix this I collected 1,251 new teacher episodes with the visuals randomized per episode: light intensity from x0.5 to x2, random cube and table colors (hues from red to blue, so purple and magenta stay unseen), and the camera moved in a random direction by up to 10 cm. One environment in five kept the original cube and another one in five the original table. I trained a new student on it with the same model and settings. The "held out" rows are outside those ranges.
+
+It did not work. The randomized student fails everywhere, including on the unchanged scene (1%), and it is no better on the held-out conditions. As far as I can tell this is not an evaluation bug: the training images look right, and the eval images match them. The student is underfitting. Its error on its own training data is 2.7 to 3.1 times the first student's, and on the original unchanged data it is 3.0 times worse. Randomized visuals make the task harder to learn, and this small model with 20 epochs is not enough for it. One design choice may also hurt the unchanged row: no training episode had the original cube and the original table together.
+
+Next I would try a larger image encoder, longer training and image augmentation, and only re-run the held-out rows once the unchanged scene is back near 90%.
+
+The 90% in the first row and the 93% in the student table above are two separate runs of the same 100 episodes, which do not reproduce exactly. Per-run results are in [`results/visual/`](results/visual/), the table in [`results/visual_robustness.md`](results/visual_robustness.md) and the fit numbers in [`results/visual_rand_diagnostics.json`](results/visual_rand_diagnostics.json).
 
 ## Limitations
 
@@ -181,7 +191,7 @@ The 90% in the first row and the 93% in the student table above are two separate
 
 ## Next steps
 
-- Retrain the student with randomized lighting, colors and camera poses, and re-run the table above.
+- Make visual randomization work: a larger image encoder, longer training and image augmentation, then re-run the visual table.
 - Fine-tune a vision-language-action model such as SmolVLA on the LeRobot dataset.
 - Move to harder tasks like stacking, with a language model proposing the reward functions and this evaluation scoring them.
 
@@ -271,6 +281,9 @@ python scripts/export_lerobot.py --raw datasets/lift_vision_raw.h5 --root datase
 
 # visual changes: best student and teacher, 7 conditions
 ./scripts/run_visual_eval.sh
+
+# randomized-visuals data, training and the held-out conditions
+./scripts/run_visual_randomization.sh
 
 # record a student rollout
 python scripts/record_student_video.py --policy student --student logs/student/bc_more_teacher/student.pt \
