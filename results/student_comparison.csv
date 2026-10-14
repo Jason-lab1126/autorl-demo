@@ -1,0 +1,7 @@
+Policy,Training episodes,Extra data beyond BC 500,Success at 2 cm [%],Mean final distance [cm],Median final distance [cm],Within 5 cm [%],Cube lifted [%]
+Teacher (state-based RL),-,-,100,0.32,0.30,100,100
+BC 500,500,-,44,8.79,2.26,78,85
+BC + more teacher data,1250,750 teacher episodes,93,2.27,0.85,97,97
+BC + DAgger round 1,750,"250 student episodes, teacher labels",55,8.22,1.75,82,84
+BC + DAgger round 2,1000,"500 student episodes, teacher labels",72,8.39,1.25,83,83
+BC + DAgger round 3,1250,"750 student episodes, teacher labels",88,3.42,0.92,95,95

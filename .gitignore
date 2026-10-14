@@ -24,3 +24,6 @@ logs/rsl_rl/**/params/*.pkl
 logs/rsl_rl/**/videos/play/*
 !logs/rsl_rl/**/videos/play/closeup_1env_10s_clean.mp4
 !logs/rsl_rl/**/videos/play/play_16env_10s.mp4
+
+# Demonstration datasets stay local (large, regenerable)
+datasets/

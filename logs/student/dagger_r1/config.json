@@ -1,0 +1,18 @@
+{
+  "data": [
+    "datasets/lift_vision_raw.h5",
+    "datasets/lift_vision_dagger_r1.h5"
+  ],
+  "out": "logs/student/dagger_r1",
+  "epochs": 20,
+  "batch_size": 256,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "seed": 0,
+  "device": "cuda:0",
+  "num_episodes": 750,
+  "train_frames": 168750,
+  "val_frames": 18750,
+  "best_val_mse": 0.028872901496887208,
+  "train_seconds": 349.91783833503723
+}

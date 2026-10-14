@@ -1,0 +1,18 @@
+{
+  "data": [
+    "datasets/lift_vision_raw.h5",
+    "datasets/lift_vision_teacher_extra.h5"
+  ],
+  "out": "logs/student/bc_more_teacher",
+  "epochs": 20,
+  "batch_size": 256,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "seed": 0,
+  "device": "cuda:0",
+  "num_episodes": 1250,
+  "train_frames": 281049,
+  "val_frames": 31250,
+  "best_val_mse": 0.0066049306945800785,
+  "train_seconds": 587.7280983924866
+}

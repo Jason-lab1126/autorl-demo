@@ -1,0 +1,15 @@
+{
+  "policy": "student",
+  "checkpoint": "/home/zxu27/autorl-demo/logs/student/dagger_r2/student.pt",
+  "task": "Isaac-Lift-Cube-Franka-Play-v0",
+  "num_episodes": 100,
+  "threshold_m": 0.02,
+  "success_rate": 0.7200000286102295,
+  "final_dist_mean_m": 0.08390713483095169,
+  "final_dist_median_m": 0.012529612518846989,
+  "final_dist_max_m": 0.6573001742362976,
+  "success_rate_5cm": 0.8299999833106995,
+  "lifted_rate": 0.8299999833106995,
+  "dropped_rate": 0.0,
+  "seed": 0
+}

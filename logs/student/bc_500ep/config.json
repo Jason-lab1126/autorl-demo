@@ -1,0 +1,16 @@
+{
+  "data": [
+    "datasets/lift_vision_raw.h5"
+  ],
+  "out": "logs/student/bc_500ep",
+  "epochs": 20,
+  "batch_size": 256,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "seed": 0,
+  "device": "cuda:0",
+  "train_frames": 112500,
+  "val_frames": 12500,
+  "best_val_mse": 0.010110278825759888,
+  "train_seconds": 211.58372616767883
+}
