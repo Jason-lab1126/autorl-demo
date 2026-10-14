@@ -1,0 +1,62 @@
+{
+  "note": "How each recorded clip ended. Distances are cube-to-goal at the last frame before the episode ends.",
+  "student_checkpoint": "logs/student/bc_more_teacher/student.pt",
+  "teacher_checkpoint": "logs/rsl_rl/franka_lift/2026-10-13_15-19-32_ppo_baseline/model_1499.pt",
+  "files": {
+    "teacher_vs_student.gif / .mp4": "first episode (5 s) of teacher_seed0 and student_seed0, side by side",
+    "student_closeup_10s.mp4": "student_seed0, external view, both episodes",
+    "student_side_by_side.gif / .mp4": "student_seed0, external view next to the student's 84x84 input",
+    "student_failure.gif / .mp4": "student_fail_env64: a failed episode from the 100-episode eval (seed 0)"
+  },
+  "recordings": {
+    "student_seed0": {
+      "policy": "student",
+      "env_index": 0,
+      "num_envs": 1,
+      "seed": 0,
+      "episodes": [
+        {
+          "end_step": 250,
+          "last_frame_dist_cm": 1.46,
+          "last_frame_cube_height_m": 0.37
+        },
+        {
+          "end_step": 500,
+          "last_frame_dist_cm": 2.4,
+          "last_frame_cube_height_m": 0.273
+        }
+      ]
+    },
+    "teacher_seed0": {
+      "policy": "teacher",
+      "env_index": 0,
+      "num_envs": 1,
+      "seed": 0,
+      "episodes": [
+        {
+          "end_step": 250,
+          "last_frame_dist_cm": 0.06,
+          "last_frame_cube_height_m": 0.363
+        },
+        {
+          "end_step": 500,
+          "last_frame_dist_cm": 0.33,
+          "last_frame_cube_height_m": 0.259
+        }
+      ]
+    },
+    "student_fail_env64": {
+      "policy": "student",
+      "env_index": 64,
+      "num_envs": 100,
+      "seed": 0,
+      "episodes": [
+        {
+          "end_step": 250,
+          "last_frame_dist_cm": 44.5,
+          "last_frame_cube_height_m": 0.021
+        }
+      ]
+    }
+  }
+}

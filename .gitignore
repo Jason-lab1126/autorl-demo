@@ -27,3 +27,6 @@ logs/rsl_rl/**/videos/play/*
 
 # Demonstration datasets stay local (large, regenerable)
 datasets/
+
+# Uncompressed recordings; the composed clips in media/ are committed
+media/raw/

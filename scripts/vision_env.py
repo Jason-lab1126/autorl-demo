@@ -44,8 +44,15 @@ def make_vision_env(
     eye: tuple = CAMERA_EYE,
     lookat: tuple = CAMERA_LOOKAT,
     focal_length: float = CAMERA_FOCAL_LENGTH,
+    viewer_eye: tuple | None = None,
+    viewer_lookat: tuple | None = None,
+    viewer_env_index: int = 0,
 ):
-    """Creates the lift-cube environment (wrapped for rsl_rl) with a camera added to every environment."""
+    """Creates the lift-cube environment (wrapped for rsl_rl) with a camera added to every environment.
+
+    Passing ``viewer_eye`` additionally enables ``base_env.render()``: an external 1280x720 view for
+    videos, placed relative to environment ``viewer_env_index``. It does not affect the student's camera.
+    """
     env_cfg = parse_env_cfg(TASK, device=device, num_envs=num_envs)
     env_cfg.seed = seed
     # render again after a reset, so the first image of an episode shows the new episode
@@ -62,7 +69,12 @@ def make_vision_env(
         width=image_size,
         height=image_size,
     )
-    env = RslRlVecEnvWrapper(gym.make(TASK, cfg=env_cfg))
+    if viewer_eye is not None:
+        env_cfg.viewer.origin_type = "env"
+        env_cfg.viewer.env_index = viewer_env_index
+        env_cfg.viewer.eye = tuple(viewer_eye)
+        env_cfg.viewer.lookat = tuple(viewer_lookat)
+    env = RslRlVecEnvWrapper(gym.make(TASK, cfg=env_cfg, render_mode="rgb_array" if viewer_eye is not None else None))
     base_env = env.unwrapped
 
     terms = base_env.observation_manager.active_terms["policy"]
