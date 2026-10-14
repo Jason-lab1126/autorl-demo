@@ -19,7 +19,7 @@ This is a first step toward generating robot training data with simulation and r
 
 ## What I built
 
-The lift task and the PPO training are stock Isaac Lab. I did not design the task, the rewards or the training algorithm. I built the evaluation (end-of-episode success under perturbations), the noise-training study, and the student pipeline (camera data, LeRobot export, behavior cloning, DAgger, closed-loop evaluation, visual-change evaluation and visual randomization).
+The lift task and the PPO training are stock Isaac Lab. I did not design the task, the rewards or the training algorithm. I built the evaluation (end-of-episode success under perturbations), the noise-training study, and the student pipeline (camera data, LeRobot export, behavior cloning, DAgger, closed-loop evaluation), the visual robustness eval, and the visual randomization study.
 
 ## Pipeline
 
@@ -200,7 +200,8 @@ The 90% in the first row and the 93% in the student table above are two separate
 
 - Everything is in simulation. The perturbations stand in for sim-to-real gaps.
 - Each policy comes from one training run with one seed, and each number from 100 episodes. Small differences are not meaningful.
-- The student's camera is fixed and the scene is plain, apart from other robots visible in the background.
+- Lighting and colors are now partly handled: the randomized ResNet-18 student keeps 53 to 81% under those changes, against 86% on the unchanged scene. I only randomized light intensity and flat cube and table colors, not textures, shadows or clutter, and the scene is otherwise plain.
+- Camera pose is still the main gap. The student drops to 46% with the camera moved 5 cm and 16% at 12 cm, so a real setup would need a carefully fixed camera or more work here.
 - The student still gets exact joint readings and the goal as numbers. Only the cube has to come from the image.
 
 ## Next steps
