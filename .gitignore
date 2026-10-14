@@ -17,6 +17,7 @@ logs/rsl_rl/**/model_*.pt
 !logs/rsl_rl/**/model_300.pt
 !logs/rsl_rl/**/model_500.pt
 !logs/rsl_rl/**/model_1499.pt
+!logs/rsl_rl/**/model_2999.pt
 logs/rsl_rl/**/events.out.tfevents.*
 logs/rsl_rl/**/git/
 logs/rsl_rl/**/params/*.pkl

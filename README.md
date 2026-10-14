@@ -14,7 +14,7 @@ Videos of the final baseline policy (`model_1499.pt`):
 
 - **The task is solved in under half an hour.** 1500 PPO iterations (4096 envs, 27 minutes on one RTX 3090) take the policy from 0% to 100% success, with the cube ending 0.3 cm from its goal on average.
 - **Robustness has cliffs.** The final policy is almost unaffected up to 5x cube mass (94%) and collapses at 10x (3%); friction costs nothing at 0.5x (99%) and nearly everything at 0.1x (2%). Observation noise degrades it smoothly: 100 → 97 → 65 → 28 → 1% at 0x, 1x, 2x, 3x, 5x.
-- **Training with observation noise was not a free win.** At the same training budget, a policy trained with randomized noise (0x–3x) holds a flat 3.2–3.6 cm final error from 0x to 3x noise, but it is far less precise: only 4% of noise-free episodes end within 2 cm, against 100% for the baseline. It beats the baseline on success rate only at 5x noise (16% vs 1%).
+- **Training with observation noise trades precision for robustness, and needs more training.** A policy trained with randomized noise (0x–3x) for the same 1500 iterations is far less precise than the baseline: only 4% of noise-free episodes end within 2 cm, against 100%. Doubling its training to 3000 iterations raises that to 63%, still below the baseline, and it then beats the baseline under strong noise (49% vs 28% at 3x, 15% vs 1% at 5x).
 
 More findings are under [Results](#results).
 
@@ -62,7 +62,9 @@ Success is measured at the **end** of each episode: the cube must finish within 
 
 ![Mean episode reward vs. training iteration for both training runs](results/training_curve.png)
 
-The baseline reaches a mean episode reward of 152.2 after 1500 iterations; the noise-randomized run reaches 118.9 and is still rising. The dip around iteration 430 in both runs coincides with the curriculum raising the two penalty weights. The plotted values are in [`results/training_curve.csv`](results/training_curve.csv).
+The baseline reaches a mean episode reward of 152.2 after 1500 iterations. The noise-randomized run reaches 118.9 at iteration 1500 and 119.4 at iteration 3000. The dip around iteration 430 in both runs coincides with the curriculum raising the two penalty weights.
+
+The noise-randomized run was trained to 1500 iterations and later resumed to 3000, which leaves two artifacts in its curve: the sharp drop at iteration 1500 is the reward statistics restarting, and because the curriculum also restarts, the penalties are weak again for a while (reward up to 140.7 at iteration 1640) before being raised a second time (dip to 92.9 at iteration 1927). The plotted values are in [`results/training_curve.csv`](results/training_curve.csv).
 
 ### Success rate [%] (final distance < 2 cm), baseline policy
 
@@ -131,32 +133,50 @@ The levels are defined in one table at the top of [`scripts/eval_lift.py`](scrip
 
 ## Baseline vs noise-randomized training
 
-A second policy was trained with the same task, PPO settings and budget (4096 envs, 1500 iterations, 28 minutes), with one change: every environment draws an observation-noise multiplier uniformly from 0x to 3x at the start of each episode, using the same noise model as the eval sweep. Both policies are compared at iteration 1499.
+A second policy was trained with the same task and PPO settings, with one change: every environment draws an observation-noise multiplier uniformly from 0x to 3x at the start of each episode, using the same noise model as the eval sweep. It was evaluated twice: after the same budget as the baseline (1500 iterations, 28 minutes), and after resuming training to 3000 iterations (21 more minutes) to test whether it was simply undertrained.
 
-![Success rate vs. observation noise for the baseline and the noise-trained policy](results/success_vs_obs_noise_compare.png)
+![Success rate vs. observation noise for the baseline and the noise-trained policy at 1500 and 3000 iterations](results/success_vs_obs_noise_compare.png)
 
-**Takeaway: at this training budget, noise randomization made the policy insensitive to observation noise but much less precise, so it is worse than the baseline without noise (4% vs 100% within 2 cm).**
+**Takeaway: the noise-trained policy was undertrained, but more training only closes part of the gap. Doubling its training lifts noise-free success from 4% to 63% (baseline 100%), and it then beats the baseline at 3x and 5x noise.**
 
-| Noise | Baseline success | Noise-trained success | Baseline mean final distance | Noise-trained mean final distance |
-|---|---|---|---|---|
-| x0 | 100% | 4% | 0.31 cm | 3.49 cm |
-| x1 | 97% | 5% | 0.96 cm | 3.58 cm |
-| x2 | 65% | 15% | 3.91 cm | 3.19 cm |
-| x3 | 28% | 18% | 12.24 cm | 3.35 cm |
-| x5 | 1% | 16% | 42.39 cm | 10.76 cm |
+Success rate (final distance < 2 cm):
 
-- The noise-trained policy still lifts the cube in 98–99% of episodes up to 3x noise; it stops about 3 cm from the goal instead of within 2 cm, so the 2 cm threshold counts almost all of its episodes as failures.
-- Its final error barely moves between 0x and 3x noise (3.2–3.6 cm), while the baseline's grows from 0.3 cm to 12.2 cm. On mean final distance it is ahead of the baseline from 2x noise upward.
-- Its training reward (118.9) is below the baseline's (152.2) and still rising at iteration 1500, so it may simply need longer training; this has not been tested.
+| Noise | Baseline, 1500 it | Noise-trained, 1500 it | Noise-trained, 3000 it |
+|---|---|---|---|
+| x0 | 100% | 4% | 63% |
+| x1 | 97% | 5% | 69% |
+| x2 | 65% | 15% | 56% |
+| x3 | 28% | 18% | 49% |
+| x5 | 1% | 16% | 15% |
 
-The per-cell statistics are in [`results/obs_noise_dr/`](results/obs_noise_dr/).
+Mean final distance:
+
+| Noise | Baseline, 1500 it | Noise-trained, 1500 it | Noise-trained, 3000 it |
+|---|---|---|---|
+| x0 | 0.31 cm | 3.49 cm | 1.93 cm |
+| x1 | 0.96 cm | 3.58 cm | 1.88 cm |
+| x2 | 3.91 cm | 3.19 cm | 2.88 cm |
+| x3 | 12.24 cm | 3.35 cm | 4.58 cm |
+| x5 | 42.39 cm | 10.76 cm | 14.42 cm |
+
+- **At 1500 iterations the noise-trained policy is robust but imprecise.** It lifts the cube in 98–99% of episodes up to 3x noise and its final error stays flat at 3.2–3.6 cm, but that is just outside the 2 cm threshold, so almost every episode counts as a failure. It beats the baseline on success rate only at 5x noise.
+- **At 3000 iterations it is much more precise.** Without noise its mean final error falls from 3.49 cm to 1.93 cm and success rises from 4% to 63%. It is still well short of the baseline's 0.31 cm and 100%.
+- **The crossover moves to moderate noise.** The 3000-iteration policy is below the baseline at 0x and 1x, about level at 2x (56% vs 65%, close to the sampling error of 100 episodes), and ahead at 3x (49% vs 28%) and 5x (15% vs 1%). On mean final distance it is ahead from 2x upward.
+- **The training reward does not show the improvement.** It is 118.9 at iteration 1500 and 119.4 at iteration 3000, although the evaluated precision improved a lot. Training reward is measured with noisy observations and exploration noise, so it is a poor proxy here.
+
+Two caveats on this comparison:
+
+- The 3000-iteration policy was **resumed** from the 1500-iteration checkpoint, not trained in one run. Resuming restarts the task's penalty curriculum, so it is not identical to an uninterrupted 3000-iteration run.
+- The baseline was not trained to 3000 iterations, so there is no equal-budget comparison at 3000. The baseline is already at 100% without noise; whether longer training changes its robustness has not been tested.
+
+The per-cell statistics are in [`results/obs_noise_dr/`](results/obs_noise_dr/) (1500 iterations) and [`results/obs_noise_dr_3000/`](results/obs_noise_dr_3000/) (3000 iterations).
 
 ## Limitations
 
 - **State-based policy.** The policy reads the exact cube position and joint state from the simulator. It has no camera input, so nothing here says how a vision policy would behave.
 - **Simulation only.** Nothing has been run on a real robot. The perturbations are stand-ins for sim-to-real gaps, not measurements of them.
 - **100 episodes per cell.** A success rate near 50% carries roughly ±10 points of sampling uncertainty, so small differences between cells are not meaningful.
-- **One training run per policy.** Both policies come from a single seed, so run-to-run variation is not measured.
+- **One training run per policy.** Each policy comes from a single seed, so run-to-run variation is not measured.
 
 ## Next steps
 
@@ -204,6 +224,13 @@ To train with observation-noise randomization (multiplier drawn from 0x to `OBS_
 TRAIN_PY=scripts/train_lift_obs_noise.py ./scripts/train_lift.sh --run_name ppo_obs_noise
 ```
 
+To resume that run from iteration 1499 up to iteration 2999 (written to a new run directory):
+
+```bash
+TRAIN_PY=scripts/train_lift_obs_noise.py ./scripts/train_lift.sh --run_name ppo_obs_noise_resume \
+    --resume True --load_run 2026-10-13_16-36-46_ppo_obs_noise --checkpoint model_1499.pt --max_iterations 1501
+```
+
 ### Evaluate
 
 ```bash
@@ -213,12 +240,16 @@ python scripts/eval_lift.py --run_dir $RUN --headless --device cuda:0
 
 Runs the full matrix (4 checkpoints x 16 cells, about 5 minutes) in a single simulator instance and writes `eval_matrix.md`, `eval_matrix.csv` and `eval_matrix_cells.csv` into `results/`. Useful options: `--iters 500 1499`, `--perturbations obs_noise cube_mass`, `--num_envs 100`, `--threshold 0.02`, `--out_dir results`.
 
-The noise-trained policy was evaluated on the noise sweep only:
+The noise-trained policy was evaluated on the noise sweep only, at 1500 and 3000 iterations:
 
 ```bash
 NOISE_RUN=logs/rsl_rl/franka_lift/2026-10-13_16-36-46_ppo_obs_noise
 python scripts/eval_lift.py --run_dir $NOISE_RUN --iters 1499 --perturbations obs_noise \
     --out_dir results/obs_noise_dr --headless --device cuda:0
+
+NOISE_RUN_3000=logs/rsl_rl/franka_lift/2026-10-13_17-10-08_ppo_obs_noise_resume
+python scripts/eval_lift.py --run_dir $NOISE_RUN_3000 --iters 2999 --perturbations obs_noise \
+    --out_dir results/obs_noise_dr_3000 --headless --device cuda:0
 ```
 
 ### Plot
@@ -227,12 +258,13 @@ python scripts/eval_lift.py --run_dir $NOISE_RUN --iters 1499 --perturbations ob
 # success vs. noise and vs. mass, one line per checkpoint
 python scripts/plot_eval.py
 
-# two policies on one sweep
-python scripts/plot_compare.py --policies "Baseline=results" "Noise-trained (x0-x3)=results/obs_noise_dr" \
+# several policies on one sweep (@ITER picks a checkpoint other than --iter)
+python scripts/plot_compare.py --policies "Baseline (1500 it)=results" "Noise-trained (1500 it)=results/obs_noise_dr" \
+    "Noise-trained (3000 it)=results/obs_noise_dr_3000@2999" \
     --perturbation obs_noise --iter 1499 --out results/success_vs_obs_noise_compare.png
 
-# training curves from the TensorBoard logs
-python scripts/plot_training.py --runs "Baseline=$RUN" "Noise-trained (x0-x3)=$NOISE_RUN" \
+# training curves from the TensorBoard logs (+ joins a run with the run resumed from it)
+python scripts/plot_training.py --runs "Baseline=$RUN" "Noise-trained (x0-x3)=$NOISE_RUN+$NOISE_RUN_3000" \
     --out results/training_curve.png
 ```
 
@@ -259,7 +291,8 @@ python scripts/record_video.py --checkpoint $RUN/model_1499.pt --name closeup --
 | `env.sh` | Environment setup and GPU pinning |
 | `scripts/` | Train, eval matrix, plotting and video scripts |
 | `results/` | Eval tables (markdown, CSV), plots and the training-curve values |
-| `results/obs_noise_dr/` | Noise-sweep eval of the noise-trained policy |
+| `results/obs_noise_dr/`, `results/obs_noise_dr_3000/` | Noise-sweep eval of the noise-trained policy at 1500 and 3000 iterations |
 | `media/` | GIF preview used in this README |
 | `logs/rsl_rl/franka_lift/2026-10-13_15-19-32_ppo_baseline/` | The baseline training run: checkpoints for iterations 100, 300, 500 and 1499, the exported policy (`exported/policy.pt`, `policy.onnx`), configs (`params/`), the first single-checkpoint eval (`eval/`) and the two videos |
 | `logs/rsl_rl/franka_lift/2026-10-13_16-36-46_ppo_obs_noise/` | The noise-randomized training run: the same four checkpoints and configs, including `params/obs_noise.json` |
+| `logs/rsl_rl/franka_lift/2026-10-13_17-10-08_ppo_obs_noise_resume/` | That run resumed to 3000 iterations: the final checkpoint (`model_2999.pt`) and configs |

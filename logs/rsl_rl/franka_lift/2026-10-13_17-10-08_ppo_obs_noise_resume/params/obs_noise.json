@@ -1,0 +1,12 @@
+{
+  "multiplier_range": [
+    0.0,
+    3.0
+  ],
+  "base_std": {
+    "joint_pos": 0.01,
+    "joint_vel": 0.1,
+    "object_position": 0.01
+  },
+  "resampled": "per episode"
+}

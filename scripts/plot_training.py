@@ -1,7 +1,8 @@
 """Plot training curves (mean episode reward vs. iteration) from the runs' TensorBoard logs.
 
-Each run is given as LABEL=RUN_DIR. Writes the plot and a CSV of the plotted values. Needs no
-simulator:
+Each run is given as LABEL=RUN_DIR. Join a run and the runs resumed from it with "+"
+(LABEL=RUN_DIR+RESUMED_RUN_DIR) to draw them as one line. Writes the plot and a CSV of the plotted
+values. Needs no simulator:
 
     python scripts/plot_training.py --runs "Baseline=logs/rsl_rl/franka_lift/<run>" --out results/training_curve.png
 """
@@ -23,7 +24,7 @@ COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
 SURFACE, INK, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#e1e0d9", "#c3c2b7"
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-parser.add_argument("--runs", type=str, nargs="+", required=True, help="LABEL=RUN_DIR, one per training run.")
+parser.add_argument("--runs", type=str, nargs="+", required=True, help="LABEL=RUN_DIR[+RESUMED_RUN_DIR...], one per line.")
 parser.add_argument("--out", type=str, default="results/training_curve.png")
 args = parser.parse_args()
 if len(args.runs) > len(COLORS):
@@ -33,15 +34,19 @@ fig, ax = plt.subplots(figsize=(7, 4.2), dpi=200, facecolor=SURFACE)
 ax.set_facecolor(SURFACE)
 curves = {}
 for run, color in zip(args.runs, COLORS):
-    label, run_dir = run.split("=", 1)
-    event_files = sorted(glob.glob(os.path.join(run_dir, "events.out.tfevents.*")))
-    if not event_files:
-        raise FileNotFoundError(f"No TensorBoard event file in {run_dir}.")
-    accumulator = EventAccumulator(event_files[-1], size_guidance={"scalars": 0})
-    accumulator.Reload()
-    events = accumulator.Scalars(TAG)
-    curves[label] = {e.step: e.value for e in events}
-    ax.plot([e.step for e in events], [e.value for e in events], color=color, linewidth=2, label=label)
+    label, run_dirs = run.split("=", 1)
+    values = {}
+    for run_dir in run_dirs.split("+"):
+        event_files = sorted(glob.glob(os.path.join(run_dir, "events.out.tfevents.*")))
+        if not event_files:
+            raise FileNotFoundError(f"No TensorBoard event file in {run_dir}.")
+        accumulator = EventAccumulator(event_files[-1], size_guidance={"scalars": 0})
+        accumulator.Reload()
+        # a resumed run starts by repeating the iteration it was loaded from; keep the original value
+        values.update({e.step: e.value for e in accumulator.Scalars(TAG) if e.step not in values})
+    curves[label] = values
+    steps = sorted(values)
+    ax.plot(steps, [values[step] for step in steps], color=color, linewidth=2, label=label)
 
 ax.set_xlim(0, max(max(c) for c in curves.values()))
 ax.set_ylim(bottom=0)

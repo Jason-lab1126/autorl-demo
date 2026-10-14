@@ -1,0 +1,6 @@
+perturbation,level,value,iter_2999
+none,none,1,63
+obs_noise,x1,1,69
+obs_noise,x2,2,56
+obs_noise,x3,3,49
+obs_noise,x5,5,15
