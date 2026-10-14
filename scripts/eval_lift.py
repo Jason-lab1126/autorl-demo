@@ -28,7 +28,9 @@ from isaaclab.app import AppLauncher
 
 ISAACLAB_PATH = os.environ.get("ISAACLAB_PATH", os.path.expanduser("~/IsaacLab"))
 sys.path.append(os.path.join(ISAACLAB_PATH, "scripts", "reinforcement_learning", "rsl_rl"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cli_args  # noqa: E402  isort: skip
+from obs_noise import OBS_NOISE_STD  # noqa: E402  isort: skip
 
 # Perturbation levels as {label: value}. "none" is the shared unperturbed baseline (every multiplier at
 # x1, no noise), evaluated once per checkpoint.
@@ -37,15 +39,13 @@ PERTURBATIONS = {
     "cube_mass": {"x2": 2.0, "x3": 3.0, "x5": 5.0, "x10": 10.0},
     # multiplier on the static and dynamic friction of the cube and of the gripper fingers
     "friction": {"x0.5": 0.5, "x0.2": 0.2, "x0.1": 0.1},
-    # multiplier on OBS_NOISE_STD, Gaussian noise added to the policy's observations every step
+    # multiplier on OBS_NOISE_STD (obs_noise.py), Gaussian noise added to the policy's observations every step
     "obs_noise": {"x1": 1.0, "x2": 2.0, "x3": 3.0, "x5": 5.0},
     # std of Gaussian noise added to the policy's raw actions every step (arm and gripper)
     "action_noise": {"medium": 0.1, "strong": 0.5},
     # multiplier on the cube's x/y spawn range (default x: +-0.10 m, y: +-0.25 m)
     "spawn_range": {"medium": 1.5, "strong": 2.0},
 }
-# Base noise std per observation term; terms not listed (goal command, last action) stay noise-free.
-OBS_NOISE_STD = {"joint_pos": 0.01, "joint_vel": 0.1, "object_position": 0.01}  # rad, rad/s, m
 FINGER_BODIES = "panda_.*finger"
 
 parser = argparse.ArgumentParser(description="Robustness eval matrix for the lift-cube task.")
@@ -82,6 +82,8 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
+
+from obs_noise import obs_noise_std_vector
 
 COMMAND_NAME = "object_pose"
 SPAWN_EVENT = "reset_object_position"
@@ -137,15 +139,7 @@ def main():
     )
     default_spawn_range = dict(base_env.event_manager.get_term_cfg(SPAWN_EVENT).params["pose_range"])
 
-    # per-dimension observation noise std, laid out like the flattened policy observation
-    obs_terms = base_env.observation_manager.active_terms["policy"]
-    obs_dims = [int(torch.tensor(d).prod()) for d in base_env.observation_manager.group_obs_term_dim["policy"]]
-    unknown = set(OBS_NOISE_STD) - set(obs_terms)
-    if unknown:
-        raise KeyError(f"OBS_NOISE_STD names terms the policy does not observe: {unknown}")
-    obs_noise_std = torch.cat(
-        [torch.full((dim,), OBS_NOISE_STD.get(name, 0.0), device=device) for name, dim in zip(obs_terms, obs_dims)]
-    )
+    obs_noise_std = obs_noise_std_vector(base_env)
 
     def apply_perturbation(name: str, value: float) -> tuple[float, float]:
         """Sets the physical perturbations for a cell and returns its (obs, action) noise scales."""
