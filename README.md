@@ -16,7 +16,7 @@ In the clip above both policies start from the same cube position and goal. The 
 
 This is a first step toward generating robot training data with simulation and reinforcement learning instead of human teleoperation. A simulated policy can produce as many demonstrations as I need and be scored with no person in the loop.
 
-## What is mine and what is not
+## What I built
 
 The lift task and the PPO training are stock Isaac Lab. I did not design the task, the rewards or the training algorithm. I built the evaluation (end-of-episode success under perturbations), the noise-training study, and the student pipeline (camera data, LeRobot export, behavior cloning, DAgger, closed-loop evaluation).
 
@@ -51,6 +51,15 @@ I perturb one thing at a time: cube mass, friction of the cube and fingers, nois
 
 ### Robustness
 
+The final policy handles a cube up to 5 times heavier (94%) but fails at 10 times (3%), and friction has the same kind of cliff: 99% at half friction, 65% at 0.2x, 2% at a tenth. Sensor noise wears it down steadily instead, while action noise and a wider spawn area are tolerated best (80% and 83% at the strong levels). More training buys robustness as well as precision: at 5x mass the iteration-500 policy keeps 57% of its own unperturbed success (41 of 72), and the final policy keeps 94%.
+
+![Success rate vs. observation noise, one line per checkpoint](results/success_vs_obs_noise.png)
+
+![Success rate vs. cube mass, one line per checkpoint](results/success_vs_cube_mass.png)
+
+<details>
+<summary>Full robustness table (16 rows)</summary>
+
 Success rate [%] by training checkpoint. Iteration 100 is 0% in every row.
 
 | Perturbation | Level | iter 300 | iter 500 | iter 1499 |
@@ -74,13 +83,9 @@ Success rate [%] by training checkpoint. Iteration 100 is 0% in every row.
 
 Precision arrives late. At iteration 300 the policy already lifts the cube (9 cm from the goal on average, down from 77 cm at iteration 100), but only 1% of episodes end within 2 cm.
 
-More training also buys robustness. At 5x mass the iteration-500 policy keeps 57% of its own unperturbed success (41 of 72), and the final policy keeps 94%.
-
-![Success rate vs. observation noise, one line per checkpoint](results/success_vs_obs_noise.png)
-
-![Success rate vs. cube mass, one line per checkpoint](results/success_vs_cube_mass.png)
-
 Mean final distances are in [`results/eval_matrix.md`](results/eval_matrix.md) and all per-cell statistics in [`results/eval_matrix_cells.csv`](results/eval_matrix_cells.csv).
+
+</details>
 
 ### Training with noise is a tradeoff
 
@@ -136,6 +141,8 @@ Closed-loop, 100 episodes each, same seed and metric as the teacher's eval:
 | BC + DAgger round 1 | 750 | 55% | 8.22 cm | 1.75 cm | 84% |
 | BC + DAgger round 2 | 1000 | 72% | 8.39 cm | 1.25 cm | 83% |
 | BC + DAgger round 3 | 1250 | 88% | 3.42 cm | 0.92 cm | 95% |
+
+The teacher's 0.32 cm here and 0.31 cm in Part 1 come from two separate runs of the same 100 episodes, which do not reproduce to the last digit. I round it to 0.3 cm in the summary.
 
 BC is behavior cloning on teacher rollouts. In each DAgger round the current student drives for 250 episodes, the teacher labels what it should have done, and a new student is trained on everything so far. The "more teacher data" row adds 750 teacher episodes instead, so both end at 1,250.
 
@@ -287,3 +294,5 @@ Reward weights: reaching the cube 1.0, lifting it more than 4 cm 15.0, goal trac
 - On this server the LeRobot dataset has to be read with `video_backend="pyav"`.
 
 </details>
+
+Jayson Xu, University of Washington
