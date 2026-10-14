@@ -1,0 +1,13 @@
+# Visual robustness: teacher vs. camera-only student
+
+Best student (BC + more teacher data) and the teacher, 100 episodes per cell, same seed and end-of-episode metric (success = cube ends within 2 cm of the goal). The perturbations change only what the camera sees.
+
+| Perturbation | Teacher success | Teacher mean distance [cm] | Student success | Student mean distance [cm] | Student cube lifted |
+|---|---|---|---|---|---|
+| None | 100% | 0.32 | 90% | 3.34 | 95% |
+| Light intensity x0.5 | 100% | 0.32 | 53% | 7.72 | 85% |
+| Light intensity x2 | 100% | 0.32 | 0% | 41.15 | 1% |
+| Cube color: flat red | 100% | 0.32 | 20% | 28.80 | 32% |
+| Table color: light wood | 100% | 0.32 | 0% | 41.57 | 0% |
+| Camera shifted 5 cm sideways | 100% | 0.32 | 0% | 43.09 | 1% |
+| Camera shifted 10 cm sideways | 100% | 0.32 | 0% | 40.23 | 0% |

@@ -26,6 +26,12 @@ parser.add_argument("--num_envs", type=int, default=100, help="Number of episode
 parser.add_argument("--threshold", type=float, default=0.02, help="Success radius [m].")
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--out_dir", type=str, default="results/student_bc")
+# visual perturbations (see vision_env.make_vision_env)
+parser.add_argument("--light_scale", type=float, default=1.0)
+parser.add_argument("--cube_color", type=float, nargs=3, default=None, help="Flat RGB color for the cube, 0 to 1.")
+parser.add_argument("--table_color", type=float, nargs=3, default=None, help="Flat RGB color for the table, 0 to 1.")
+parser.add_argument("--camera_shift", type=float, nargs=3, default=[0.0, 0.0, 0.0], help="Camera offset [m].")
+parser.add_argument("--save_view", type=str, default=None, help="Save the student's image of env 0 at a few steps to this PNG.")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -52,7 +58,10 @@ LIFT_HEIGHT = 0.04  # same threshold the task's rewards use for "lifted"
 
 
 def main():
-    env = make_vision_env(args_cli.num_envs, args_cli.device, args_cli.seed)
+    env = make_vision_env(
+        args_cli.num_envs, args_cli.device, args_cli.seed, light_scale=args_cli.light_scale,
+        cube_color=args_cli.cube_color, table_color=args_cli.table_color, camera_shift=args_cli.camera_shift,
+    )
     base_env = env.unwrapped
     device = base_env.device
 
@@ -73,8 +82,11 @@ def main():
 
     recorder = EpisodeEndRecorder(base_env)
     obs, _ = env.get_observations()
+    views = []
     with torch.inference_mode():
-        for _ in range(base_env.max_episode_length + 5):
+        for t in range(base_env.max_episode_length + 5):
+            if args_cli.save_view and t in (0, 60, 240):
+                views.append(get_images(base_env)[0].cpu())
             obs, _, _, _ = env.step(act(obs))
             if bool(recorder.done.all()):
                 break
@@ -96,7 +108,16 @@ def main():
         "lifted_rate": (height > LIFT_HEIGHT).float().mean().item(),
         "dropped_rate": (~recorder.timed_out).float().mean().item(),
         "seed": args_cli.seed,
+        "light_scale": args_cli.light_scale,
+        "cube_color": args_cli.cube_color,
+        "table_color": args_cli.table_color,
+        "camera_shift_m": args_cli.camera_shift,
     }
+    if views:
+        import imageio.v2 as imageio
+
+        os.makedirs(os.path.dirname(os.path.abspath(args_cli.save_view)), exist_ok=True)
+        imageio.imwrite(args_cli.save_view, torch.cat(views, dim=1).numpy())
     os.makedirs(args_cli.out_dir, exist_ok=True)
     with open(os.path.join(args_cli.out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)

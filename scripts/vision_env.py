@@ -47,11 +47,20 @@ def make_vision_env(
     viewer_eye: tuple | None = None,
     viewer_lookat: tuple | None = None,
     viewer_env_index: int = 0,
+    light_scale: float = 1.0,
+    cube_color: tuple | None = None,
+    table_color: tuple | None = None,
+    camera_shift: tuple = (0.0, 0.0, 0.0),
 ):
     """Creates the lift-cube environment (wrapped for rsl_rl) with a camera added to every environment.
 
     Passing ``viewer_eye`` additionally enables ``base_env.render()``: an external 1280x720 view for
     videos, placed relative to environment ``viewer_env_index``. It does not affect the student's camera.
+
+    Visual perturbations (they change only what the camera sees, not the physics):
+    ``light_scale`` multiplies the scene light's intensity, ``cube_color`` and ``table_color`` replace
+    the cube's and table's materials with one flat RGB color, and ``camera_shift`` moves the student's
+    camera (eye and look-at point together) by that offset in meters.
     """
     env_cfg = parse_env_cfg(TASK, device=device, num_envs=num_envs)
     env_cfg.seed = seed
@@ -60,6 +69,11 @@ def make_vision_env(
     # the goal and gripper-frame markers would give the goal away in the image
     env_cfg.commands.object_pose.debug_vis = False
     env_cfg.scene.ee_frame.debug_vis = False
+    env_cfg.scene.light.spawn.intensity *= light_scale
+    if cube_color is not None:
+        env_cfg.scene.object.spawn.func = _spawn_with_flat_color(env_cfg.scene.object.spawn.func, "cube", cube_color)
+    if table_color is not None:
+        env_cfg.scene.table.spawn.func = _spawn_with_flat_color(env_cfg.scene.table.spawn.func, "table", table_color)
     env_cfg.scene.camera = TiledCameraCfg(
         prim_path="{ENV_REGEX_NS}/Camera",
         data_types=["rgb"],
@@ -83,11 +97,42 @@ def make_vision_env(
         raise RuntimeError(f"Unexpected observation layout: {list(zip(terms, dims))}")
 
     origins = base_env.scene.env_origins
-    eyes = origins + torch.tensor(eye, device=origins.device)
-    targets = origins + torch.tensor(lookat, device=origins.device)
+    shift = torch.tensor(camera_shift, device=origins.device)
+    eyes = origins + torch.tensor(eye, device=origins.device) + shift
+    targets = origins + torch.tensor(lookat, device=origins.device) + shift
     base_env.scene["camera"].set_world_poses_from_view(eyes, targets)
     base_env.reset(seed=seed)
     return env
+
+
+def _spawn_with_flat_color(spawn_func, name: str, color: tuple):
+    """Wraps a USD spawner so the spawned asset is drawn in one flat color.
+
+    The cube and table are instanceable USD files whose own materials win over a material bound at
+    spawn time, so the asset is made non-instanceable first and the color is bound over all of its
+    descendants. This happens before the simulation starts, and changes nothing about the physics.
+    """
+    import omni.usd
+    from pxr import Usd
+
+    def spawn(prim_path, cfg, *args, **kwargs):
+        prim = spawn_func(prim_path, cfg, *args, **kwargs)
+        stage = omni.usd.get_context().get_stage()
+        material_path = f"/World/Looks/flat_{name}"
+        if not stage.GetPrimAtPath(material_path).IsValid():
+            material_cfg = sim_utils.PreviewSurfaceCfg(diffuse_color=tuple(color))
+            material_cfg.func(material_path, material_cfg)
+        for root in sim_utils.find_matching_prims(prim_path):
+            while True:
+                instanced = [p for p in Usd.PrimRange(root) if p.IsInstanceable()]
+                if not instanced:
+                    break
+                for p in instanced:
+                    p.SetInstanceable(False)
+            sim_utils.bind_visual_material(root.GetPath().pathString, material_path, stronger_than_descendants=True)
+        return prim
+
+    return spawn
 
 
 def get_images(base_env) -> torch.Tensor:
