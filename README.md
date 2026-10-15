@@ -10,6 +10,7 @@ What I found:
 - It breaks at specific points. A cube 5 times heavier is fine (94%) and one 10 times heavier is not (3%). Sensor noise wears it down steadily: 100, 97, 65, 28 and 1% as the noise goes from 0x to 1x, 2x, 3x and 5x.
 - A camera-only student can copy it. With 500 demonstrations it succeeds 44% of the time. With 1,250 it reaches 93%, against 100% for the teacher that is told where the cube is.
 - The camera-only student broke under any visual change: brighter light, a new table color or a camera moved 5 cm took it to 0%. Training on randomized visuals with a pretrained ResNet-18 recovered most of it, 53 to 81% under light and color changes, including ones never seen in training. Camera moves are still the weak point (16 to 46%).
+- A fine-tuned SmolVLA, a pretrained vision-language-action model, did much worse than the small CNN on the same data: 15% against 93%. Its actions are least accurate while the arm reaches for the cube, which points at how it sees the 84x84 image.
 
 In the clip above both policies start from the same cube position and goal. The teacher ends 0.06 cm from the goal and the student 1.46 cm.
 
@@ -19,7 +20,7 @@ This is a first step toward generating robot training data with simulation and r
 
 ## What I built
 
-The lift task and the PPO training are stock Isaac Lab. I did not design the task, the rewards or the training algorithm. I built the evaluation (end-of-episode success under perturbations), the noise-training study, and the student pipeline (camera data, LeRobot export, behavior cloning, DAgger, closed-loop evaluation), the visual robustness eval, and the visual randomization study.
+The lift task and the PPO training are stock Isaac Lab. I did not design the task, the rewards or the training algorithm. I built the evaluation (end-of-episode success under perturbations), the noise-training study, and the student pipeline (camera data, LeRobot export, behavior cloning, DAgger, closed-loop evaluation), the visual robustness eval, the visual randomization study, and the SmolVLA fine-tuning with a policy server so it runs in the same closed-loop eval.
 
 ## Pipeline
 
@@ -35,6 +36,8 @@ flowchart LR
     R --> V["Vision student<br/>ResNet-18"]
     D --> V
     V --> E
+    D --> L["SmolVLA<br/>fine-tuned"]
+    L --> E
     E --> W["Visual-change eval<br/>incl. held-out conditions"]
     E --> T
     W --> T
@@ -196,6 +199,44 @@ Caveats: each column is one training run with one seed and 100 episodes per cell
 
 The 90% in the first row and the 93% in the student table above are two separate runs of the same 100 episodes, which do not reproduce exactly. Per-run results are in [`results/visual/`](results/visual/), the table in [`results/visual_robustness.md`](results/visual_robustness.md) and the fit numbers for all three randomized students in [`results/visual_rand_diagnostics.json`](results/visual_rand_diagnostics.json).
 
+## Part 3: SmolVLA, a negative result
+
+I fine-tuned [SmolVLA](https://huggingface.co/lerobot/smolvla_base) (450M parameters) on the LeRobot export of the same 1,250 fixed-scene episodes the best CNN student used, with the same 1,125/125 split by episode. It gets the same 84x84 image, the same 21 numbers including the goal, and the instruction "pick up the cube and move it to the target". It outputs 50 actions at a time.
+
+I used LeRobot's default fine-tuning: the vision encoder stays frozen and only the action part of the model (about 100M parameters) is trained. 20,000 steps at batch size 64, about 4.5 passes over the data, took 4 hours 10 minutes on one RTX 3090. The training loss stopped improving after about 13,000 steps.
+
+SmolVLA needs newer packages than Isaac Lab, so it runs in its own process. The eval sends it the images and states over a local socket and gets back the actions. Everything else is the same 100-episode eval as before.
+
+### Results
+
+| Policy | New actions requested every | Success at 2 cm | Mean final distance | Median final distance | Within 5 cm | Cube lifted |
+|---|---|---|---|---|---|---|
+| CNN student, BC + more teacher data | 1 step | 93% | 2.27 cm | 0.85 cm | 97% | 97% |
+| SmolVLA | 10 steps | 15% | 30.75 cm | 36.57 cm | 29% | 29% |
+| SmolVLA | 1 step | 15% | 27.37 cm | 34.15 cm | 32% | 37% |
+| SmolVLA | 25 steps | 8% | 29.98 cm | 35.09 cm | 28% | 31% |
+
+How often it replans barely matters. In most episodes it never lifts the cube.
+
+To see why, I compared both models with the teacher's actions on the 125 held-out episodes, every 5th frame (6,250 frames), with no simulator in the loop. The error is the mean squared error with each action dimension divided by its spread in the teacher's actions.
+
+| Part of the episode | CNN student | SmolVLA | Ratio |
+|---|---|---|---|
+| All frames | 0.0068 | 0.0357 | 5.2x |
+| Frames 0 to 49 (reaching for the cube) | 0.0235 | 0.1424 | 6.1x |
+| Frames 50 to 99 (grasping and lifting) | 0.0040 | 0.0128 | 3.2x |
+| Frames 100 to 249 (carrying and holding) | 0.0022 | 0.0078 | 3.5x |
+
+Both models open and close the gripper at the right time on over 99.9% of frames. The gap is in the arm, and it is largest early in the episode. That is when the policy has to find the cube in the image, since its position is not in the state. Small errors there add up in closed loop: the arm arrives at the wrong place and misses the grasp.
+
+The CNN student finds the cube from the same 84x84 pixels, so the information is in the image. My guesses for why SmolVLA does not use it, most likely first:
+
+1. The image is far from what its vision encoder was trained on. SmolVLA scales each image up to 512x512. The cube covers only a few pixels of the 84x84 frame, and scaling up adds no detail. The encoder stays frozen, so it cannot adapt.
+2. The base model is set up for three cameras at 256x256 and a 6-number state. Here it gets one small camera and 21 numbers.
+3. Training was short, 4.5 passes over the data. Since the loss had flattened, I doubt more steps on the same data would change much.
+
+I did not test these guesses. Each would need another 4-hour training run, and a higher-resolution test would also need new data. The results are in [`results/smolvla_1250_84/`](results/smolvla_1250_84/), [`results/smolvla_1250_84_replan1/`](results/smolvla_1250_84_replan1/), [`results/smolvla_1250_84_replan25/`](results/smolvla_1250_84_replan25/) and [`results/offline_action_check.json`](results/offline_action_check.json).
+
 ## Limitations
 
 - Everything is in simulation. The perturbations stand in for sim-to-real gaps.
@@ -203,11 +244,12 @@ The 90% in the first row and the 93% in the student table above are two separate
 - Lighting and colors are now partly handled: the randomized ResNet-18 student keeps 53 to 81% under those changes, against 86% on the unchanged scene. I only randomized light intensity and flat cube and table colors, not textures, shadows or clutter, and the scene is otherwise plain.
 - Camera pose is still the main gap. The student drops to 46% with the camera moved 5 cm and 16% at 12 cm, so a real setup would need a carefully fixed camera or more work here.
 - The student still gets exact joint readings and the goal as numbers. Only the cube has to come from the image.
+- SmolVLA was tested in one setup only: 84x84 images, a frozen vision encoder and one training run. The result says this setup does not work, not that SmolVLA cannot do the task.
 
 ## Next steps
 
 - Make the student robust to camera moves: a second camera, or randomizing the camera pose more widely.
-- Fine-tune a vision-language-action model such as SmolVLA on the LeRobot dataset.
+- Find out why SmolVLA underperforms: fine-tune its vision encoder too, or train on higher-resolution images.
 - Move to harder tasks like stacking, with a language model proposing the reward functions and this evaluation scoring them.
 
 ## Reproducing
@@ -231,6 +273,17 @@ The LeRobot export runs in a separate CPU-only environment:
 conda create -n lerobot python=3.10 -y && conda activate lerobot
 pip install "lerobot==0.4.4" h5py --extra-index-url https://download.pytorch.org/whl/cpu
 ```
+
+SmolVLA training and serving need GPU torch, in a copy of that environment so the export environment stays as it is:
+
+```bash
+conda create -n lerobot-gpu --clone lerobot -y && conda activate lerobot-gpu
+pip install --force-reinstall --no-deps torch==2.10.0+cu126 torchvision==0.25.0+cu126 \
+    --index-url https://download.pytorch.org/whl/cu126
+pip install "lerobot[smolvla]==0.4.4"   # transformers 4.57.6, num2words
+```
+
+If CUDA 13 `nvidia-*` packages end up installed next to the CUDA 12 ones, torch can load the wrong cuDNN and fail with `CUDNN_STATUS_NOT_INITIALIZED`. Uninstalling the CUDA 13 ones and reinstalling `nvidia-cudnn-cu12==9.10.2.21` fixed it here.
 
 </details>
 
@@ -304,6 +357,21 @@ python scripts/export_lerobot.py --raw datasets/lift_vision_raw.h5 --root datase
 FULL=1 NAME=student_visual_rand_resnet2 TRAIN_ARGS="--encoder resnet18 --crop 76 --epochs 30 --lr 1e-3 --encoder_lr 1e-4 --amp" \
     DATA="datasets/lift_vision_teacher_visrand.h5 datasets/lift_vision_raw.h5 datasets/lift_vision_teacher_extra.h5" \
     ./scripts/run_visual_rand_resnet.sh
+
+# SmolVLA: export all 1,250 fixed-scene episodes, fine-tune (about 4 hours), offline check
+conda activate lerobot
+python scripts/export_lerobot.py --raw datasets/lift_vision_raw.h5 datasets/lift_vision_teacher_extra.h5 \
+    --root datasets/lift_cube_franka_lerobot_1250_84 --no_cube_position
+conda activate lerobot-gpu
+./scripts/train_smolvla.sh datasets/lift_cube_franka_lerobot_1250_84 logs/smolvla/smolvla_1250_84 \
+    --steps=20000 --batch_size=64 --save_freq=5000 --log_freq=200 --num_workers=8
+SMOLVLA=logs/smolvla/smolvla_1250_84/checkpoints/last/pretrained_model
+python scripts/offline_action_check.py --smolvla $SMOLVLA --student logs/student/bc_more_teacher/student.pt
+
+# SmolVLA closed-loop: start the policy server, then run the eval from the Isaac Lab environment
+python scripts/smolvla_server.py --checkpoint $SMOLVLA &
+source env.sh
+python scripts/eval_student.py --policy smolvla --out_dir results/smolvla_1250_84 --headless --device cuda:0
 
 # record a student rollout
 python scripts/record_student_video.py --policy student --student logs/student/bc_more_teacher/student.pt \

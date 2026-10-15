@@ -1,0 +1,70 @@
+{
+  "num_val_frames": 31250,
+  "num_query_frames": 6250,
+  "stride": 5,
+  "units": "MSE in the CNN student's normalized action units (per-dimension teacher action std)",
+  "cnn_student": {
+    "mse": 0.0068389796651899815,
+    "mse_arm": 0.007674471475183964,
+    "mse_gripper": 0.0009905323386192322,
+    "gripper_sign_agreement": 0.99968
+  },
+  "smolvla_first_action": {
+    "mse": 0.03570789843797684,
+    "mse_arm": 0.04037818685173988,
+    "mse_gripper": 0.003015891183167696,
+    "gripper_sign_agreement": 0.99936
+  },
+  "cnn_student_frames_0_49": {
+    "mse": 0.02352195233106613,
+    "mse_arm": 0.0264422744512558,
+    "mse_gripper": 0.0030796965584158897,
+    "gripper_sign_agreement": 0.9984
+  },
+  "smolvla_first_action_frames_0_49": {
+    "mse": 0.14238965511322021,
+    "mse_arm": 0.1609502136707306,
+    "mse_gripper": 0.01246572844684124,
+    "gripper_sign_agreement": 0.9968
+  },
+  "cnn_student_frames_50_99": {
+    "mse": 0.004026398528367281,
+    "mse_arm": 0.004515649750828743,
+    "mse_gripper": 0.0006016367697156966,
+    "gripper_sign_agreement": 1.0
+  },
+  "smolvla_first_action_frames_50_99": {
+    "mse": 0.012810816988348961,
+    "mse_arm": 0.01451405230909586,
+    "mse_gripper": 0.0008881677640601993,
+    "gripper_sign_agreement": 1.0
+  },
+  "cnn_student_frames_100_249": {
+    "mse": 0.0022155146580189466,
+    "mse_arm": 0.0024714774917811155,
+    "mse_gripper": 0.0004237760731484741,
+    "gripper_sign_agreement": 1.0
+  },
+  "smolvla_first_action_frames_100_249": {
+    "mse": 0.007779676001518965,
+    "mse_arm": 0.008808888494968414,
+    "mse_gripper": 0.0005751863354817033,
+    "gripper_sign_agreement": 1.0
+  },
+  "smolvla_chunk_mse_by_step": {
+    "step_0": 0.03570789843797684,
+    "step_9": 0.05181531608104706,
+    "step_24": 0.0674738958477974,
+    "step_49": 0.029976539313793182
+  },
+  "teacher_action_std": [
+    0.8260809183120728,
+    1.231619119644165,
+    0.5296900272369385,
+    0.47887852787971497,
+    0.3669150173664093,
+    0.6414677500724792,
+    2.645550012588501,
+    1.7520116567611694
+  ]
+}

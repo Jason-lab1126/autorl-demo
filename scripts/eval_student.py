@@ -2,7 +2,8 @@
 
 Same metric as eval_lift.py: cube-to-goal distance at the END of each episode, one episode per
 environment, success if within --threshold. Pass --policy teacher to run the RL teacher in the
-same camera environment as a reference.
+same camera environment as a reference. Pass --policy smolvla to query a SmolVLA policy served by
+smolvla_server.py (conda env lerobot-gpu) on a local socket; it replans every --replan steps.
 
     python scripts/eval_student.py --student logs/student/bc_500ep/student.pt --out_dir results/student_bc \\
         --headless --device cuda:0
@@ -20,8 +21,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cli_args  # noqa: E402  isort: skip
 
 parser = argparse.ArgumentParser(description="Closed-loop evaluation of the vision student.")
-parser.add_argument("--policy", type=str, default="student", choices=["student", "teacher"])
+parser.add_argument("--policy", type=str, default="student", choices=["student", "teacher", "smolvla"])
 parser.add_argument("--student", type=str, default=None, help="Student checkpoint (student.pt).")
+parser.add_argument("--server_port", type=int, default=47310, help="smolvla_server.py port (--policy smolvla).")
+parser.add_argument("--replan", type=int, default=10, help="Steps of each SmolVLA action chunk to execute before replanning.")
+parser.add_argument("--image_size", type=int, default=84, help="Camera resolution.")
 parser.add_argument("--num_envs", type=int, default=100, help="Number of episodes (one per environment).")
 parser.add_argument("--threshold", type=float, default=0.02, help="Success radius [m].")
 parser.add_argument("--seed", type=int, default=0)
@@ -54,27 +58,47 @@ from vision_env import EpisodeEndRecorder, get_images, make_vision_env, student_
 
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg
 
+INSTRUCTION = "pick up the cube and move it to the target"  # the task string in the datasets
 LIFT_HEIGHT = 0.04  # same threshold the task's rewards use for "lifted"
 
 
 def main():
     env = make_vision_env(
-        args_cli.num_envs, args_cli.device, args_cli.seed, light_scale=args_cli.light_scale,
+        args_cli.num_envs, args_cli.device, args_cli.seed, image_size=args_cli.image_size, light_scale=args_cli.light_scale,
         cube_color=args_cli.cube_color, table_color=args_cli.table_color, camera_shift=args_cli.camera_shift,
     )
     base_env = env.unwrapped
     device = base_env.device
 
+    def images():
+        return get_images(base_env)
+
+    connection = None
     if args_cli.policy == "teacher":
         agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(vision_env.TASK, args_cli)
         runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
         runner.load(os.path.abspath(args_cli.checkpoint))
         teacher = runner.get_inference_policy(device=device)
-        act = lambda obs: teacher(obs)  # noqa: E731
+        act = lambda obs, t: teacher(obs)  # noqa: E731
         source = os.path.abspath(args_cli.checkpoint)
+    elif args_cli.policy == "smolvla":
+        from multiprocessing.connection import Client
+
+        connection = Client(("127.0.0.1", args_cli.server_port), authkey=b"autorl-demo")
+        chunk = None
+
+        def act(obs, t):
+            nonlocal chunk
+            if t % args_cli.replan == 0:
+                request = {"image": images().cpu().numpy(), "state": student_state(obs).cpu().numpy(), "task": INSTRUCTION}
+                connection.send(request)
+                chunk = torch.from_numpy(connection.recv()).to(device)
+            return chunk[:, t % args_cli.replan]
+
+        source = f"smolvla server on port {args_cli.server_port}"
     else:
         student = load_student(args_cli.student, device)
-        act = lambda obs: student(get_images(base_env), student_state(obs))  # noqa: E731
+        act = lambda obs, t: student(images(), student_state(obs))  # noqa: E731
         source = os.path.abspath(args_cli.student)
 
     recorder = EpisodeEndRecorder(base_env)
@@ -83,8 +107,8 @@ def main():
     with torch.inference_mode():
         for t in range(base_env.max_episode_length + 5):
             if args_cli.save_view and t in (0, 60, 240):
-                views.append(get_images(base_env)[0].cpu())
-            obs, _, _, _ = env.step(act(obs))
+                views.append(images()[0].cpu())
+            obs, _, _, _ = env.step(act(obs, t))
             if bool(recorder.done.all()):
                 break
     if not bool(recorder.done.all()):
@@ -109,7 +133,11 @@ def main():
         "cube_color": args_cli.cube_color,
         "table_color": args_cli.table_color,
         "camera_shift_m": args_cli.camera_shift,
+        "image_size": args_cli.image_size,
     }
+    if args_cli.policy == "smolvla":
+        summary["replan_steps"] = args_cli.replan
+        connection.close()
     if views:
         import imageio.v2 as imageio
 
