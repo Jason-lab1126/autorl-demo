@@ -1,0 +1,30 @@
+{
+  "policy": "smolvla",
+  "checkpoint": "smolvla server on port 47310",
+  "task": "Isaac-Lift-Cube-Franka-Play-v0",
+  "num_episodes": 100,
+  "threshold_m": 0.02,
+  "success_rate": 0.15000000596046448,
+  "final_dist_mean_m": 0.28190377354621887,
+  "final_dist_median_m": 0.33358022570610046,
+  "final_dist_max_m": 0.5698186159133911,
+  "success_rate_5cm": 0.3100000023841858,
+  "lifted_rate": 0.33000001311302185,
+  "dropped_rate": 0.0,
+  "seed": 0,
+  "light_scale": 1.0,
+  "cube_color": null,
+  "table_color": null,
+  "camera_shift_m": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "image_size": 84,
+  "replan_steps": 10,
+  "oracle_crop": {
+    "crop_size": 128,
+    "render_size": 512,
+    "note": "crop centered on the simulator's true cube position, not a real detector"
+  }
+}

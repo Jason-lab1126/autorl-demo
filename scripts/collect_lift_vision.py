@@ -18,6 +18,11 @@ to a LeRobot dataset.
         --num_envs 125 --episodes_per_env 4 --headless --device cuda:0
 
 Use --probe_steps N to only time N steps and save sample images, without writing a dataset.
+
+With --crop_size C, a second camera at the same pose renders at --crop_render_size, and every frame
+also stores a C x C crop of it centered on the cube's TRUE position projected into the camera (an
+oracle crop, standing in for a perfect detector). --no_compression writes the HDF5 file
+uncompressed, which is faster for a temporary file in RAM (/dev/shm) that is exported right away.
 """
 
 import argparse
@@ -46,6 +51,9 @@ parser.add_argument("--randomize", action="store_true", help="Randomize lighting
 parser.add_argument("--light_range", type=float, nargs=2, default=[0.5, 2.0])
 parser.add_argument("--max_camera_shift", type=float, default=0.10, help="[m]")
 parser.add_argument("--probe_dir", type=str, default="probe")
+parser.add_argument("--crop_size", type=int, default=0, help="Also store an oracle crop of this size around the cube (0 = off).")
+parser.add_argument("--crop_render_size", type=int, default=512, help="Resolution of the camera the crop is taken from.")
+parser.add_argument("--no_compression", action="store_true", help="Write the HDF5 file uncompressed.")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -63,7 +71,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import vision_env
 from student_policy import load_student
-from vision_env import ACTION_DIM, STATE_DIM, VisualRandomizer, cube_position, get_images, make_vision_env, student_state
+from vision_env import ACTION_DIM, STATE_DIM, VisualRandomizer, cube_position, get_images, make_vision_env, oracle_crops, student_state
 
 # Training palette for random colors: hue below this bound (red through blue). Hues from it up to 1
 # (purple, magenta) are never used in training, so they can serve as held-out colors.
@@ -80,7 +88,8 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg
 
 def main():
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(vision_env.TASK, args_cli)
-    env = make_vision_env(args_cli.num_envs, args_cli.device, args_cli.seed, image_size=args_cli.image_size, randomizable=args_cli.randomize)
+    env = make_vision_env(args_cli.num_envs, args_cli.device, args_cli.seed, image_size=args_cli.image_size, randomizable=args_cli.randomize,
+                           crop_render_size=args_cli.crop_render_size if args_cli.crop_size > 0 else 0)
     base_env = env.unwrapped
     num_envs, device = base_env.num_envs, base_env.device
 
@@ -102,6 +111,9 @@ def main():
     cube_pos = torch.zeros(num_steps, num_envs, 3)
     goal_dist = torch.zeros(num_steps, num_envs)
     dones = torch.zeros(num_steps, num_envs, dtype=torch.bool)
+    crop = args_cli.crop_size
+    crops = torch.zeros(num_steps, num_envs, crop, crop, 3, dtype=torch.uint8) if crop > 0 else None
+    crop_centers = torch.zeros(num_steps, num_envs, 2) if crop > 0 else None
 
     import numpy as np
 
@@ -147,6 +159,9 @@ def main():
             actions[t] = clean_action.cpu()
             executed[t] = noisy_action.cpu()
             cube_pos[t] = cube_position(obs).cpu()
+            if crops is not None:
+                crop_images, centers = oracle_crops(base_env, cube_position(obs), crop)
+                crops[t], crop_centers[t] = crop_images.cpu(), centers.cpu()
             goal_dist[t] = torch.norm(cube_position(obs) - obs[:, 21:24], dim=1).cpu()
             obs, _, done, _ = env.step(noisy_action)
             dones[t] = done.bool().cpu()
@@ -166,6 +181,9 @@ def main():
         for t in sorted({0, num_steps // 2, num_steps - 1} | ({episode_length, episode_length + 5} if num_steps > episode_length + 5 else set())):
             strip = torch.cat([images[t, i] for i in range(min(4, num_envs))], dim=1).numpy()
             imageio.imwrite(os.path.join(args_cli.probe_dir, f"step_{t:03d}.png"), strip)
+            if crops is not None:
+                strip = torch.cat([crops[t, i] for i in range(min(4, num_envs))], dim=1).numpy()
+                imageio.imwrite(os.path.join(args_cli.probe_dir, f"crop_{t:03d}.png"), strip)
         full_steps = args_cli.episodes_per_env * base_env.max_episode_length
         print(f"[collect] PROBE: full collection of {full_steps} steps would take about {full_steps / steps_per_s / 60:.1f} min")
         print(f"[collect] PROBE: image dtype/shape {tuple(images.shape[2:])}, mean pixel {images.float().mean():.1f}")
@@ -173,11 +191,12 @@ def main():
         return
 
     write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones,
-                  (round_light, round_cube, round_table, round_shift) if randomizer is not None else None)
+                  (round_light, round_cube, round_table, round_shift) if randomizer is not None else None,
+                  (crops, crop_centers) if crops is not None else None)
     env.close()
 
 
-def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones, visuals=None):
+def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones, visuals=None, oracle=None):
     import h5py
     import numpy as np
 
@@ -197,11 +216,15 @@ def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones,
 
     os.makedirs(os.path.dirname(os.path.abspath(args_cli.out)), exist_ok=True)
     size = images.shape[2]
+    compression = {} if args_cli.no_compression else {"compression": "gzip", "compression_opts": 4}
     with h5py.File(args_cli.out, "w") as f:
-        image_ds = f.create_dataset(
-            "image", (total, size, size, 3), dtype="uint8", chunks=(256, size, size, 3), compression="gzip", compression_opts=4
-        )
+        image_ds = f.create_dataset("image", (total, size, size, 3), dtype="uint8", chunks=(256, size, size, 3), **compression)
         arrays = {"state": states, "action": actions, "executed_action": executed, "cube_position": cube_pos}
+        if oracle is not None:
+            crops, crop_centers = oracle
+            crop = crops.shape[2]
+            crop_ds = f.create_dataset("crop", (total, crop, crop, 3), dtype="uint8", chunks=(64, crop, crop, 3), **compression)
+            arrays["crop_center"] = crop_centers
         float_ds = {k: f.create_dataset(k, (total, v.shape[-1]), dtype="float32") for k, v in arrays.items()}
         episode_index = np.zeros(total, dtype=np.int64)
         frame_index = np.zeros(total, dtype=np.int64)
@@ -210,6 +233,8 @@ def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones,
         for episode, (env_id, begin, end) in enumerate(spans):
             n = end - begin
             image_ds[cursor : cursor + n] = images[begin:end, env_id].numpy()
+            if oracle is not None:
+                crop_ds[cursor : cursor + n] = crops[begin:end, env_id].numpy()
             for k, v in arrays.items():
                 float_ds[k][cursor : cursor + n] = v[begin:end, env_id].numpy()
             episode_index[cursor : cursor + n] = episode
@@ -249,6 +274,9 @@ def write_dataset(images, states, actions, executed, cube_pos, goal_dist, dones,
             "max_camera_shift_m": args_cli.max_camera_shift,
             "keep_original": "env index % 5 == 0 keeps the original cube, == 2 the original table",
             "train_max_hue": TRAIN_MAX_HUE,
+            "crop_size": args_cli.crop_size,
+            "crop_render_size": args_cli.crop_render_size if args_cli.crop_size > 0 else 0,
+            "crop": "oracle crop centered on the true cube position projected into the camera" if args_cli.crop_size > 0 else "",
         })
     print(
         f"[collect] wrote {args_cli.out}: {len(spans)} episodes ({int(is_val.sum())} val), {total} frames,"

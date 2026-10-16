@@ -1,0 +1,24 @@
+{
+  "num_query_frames": 6250,
+  "stride": 5,
+  "units": "MSE in the CNN student's normalized action units (per-dimension teacher action std)",
+  "images": "decoded from the LeRobot videos",
+  "true_crop": {
+    "all_frames": 0.03464288264513016,
+    "frames_0_49": 0.12971916794776917,
+    "frames_50_99": 0.014261686243116856,
+    "frames_100_249": 0.009744520299136639
+  },
+  "shuffled_crop": {
+    "all_frames": 0.062423232942819595,
+    "frames_0_49": 0.26599451899528503,
+    "frames_50_99": 0.015322546474635601,
+    "frames_100_249": 0.01026635430753231
+  },
+  "black_crop": {
+    "all_frames": 0.10805394500494003,
+    "frames_0_49": 0.49294495582580566,
+    "frames_50_99": 0.015300136990845203,
+    "frames_100_249": 0.010674885474145412
+  }
+}

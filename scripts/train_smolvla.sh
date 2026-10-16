@@ -2,7 +2,8 @@
 # Fine-tune SmolVLA (lerobot/smolvla_base) on a LeRobot export of the teacher demonstrations.
 # Runs in the lerobot-gpu conda env on one GPU (DEMO_GPU, default 0). Extra arguments go to lerobot-train.
 # Only the newest checkpoint is kept on disk. TRAIN_VISION=1 also trains the vision encoder
-# (scripts/lerobot_train_vision.py).
+# (scripts/lerobot_train_vision.py). RENAME_MAP replaces the camera rename map, e.g. for a dataset
+# with the oracle crop as a second camera.
 #
 #     scripts/train_smolvla.sh <dataset root> <output dir> [--steps=20000 --batch_size=32 ...]
 set -eo pipefail
@@ -27,6 +28,7 @@ prune_checkpoints() {
 }
 prune_checkpoints &
 trap 'kill %1 2>/dev/null' EXIT
+[[ -n "$RENAME_MAP" ]] || RENAME_MAP='{"observation.images.front": "observation.images.camera1"}'
 TRAIN=(lerobot-train)
 [[ "${TRAIN_VISION:-0}" == 1 ]] && TRAIN=(python "$(dirname "${BASH_SOURCE[0]}")/lerobot_train_vision.py")
 "${TRAIN[@]}" \
@@ -37,7 +39,7 @@ TRAIN=(lerobot-train)
     --dataset.root="$ROOT" \
     --dataset.episodes="$EPISODES" \
     --dataset.video_backend=pyav \
-    --rename_map='{"observation.images.front": "observation.images.camera1"}' \
+    --rename_map="$RENAME_MAP" \
     --output_dir="$OUT" \
     --job_name="$(basename "$OUT")" \
     --wandb.enable=false \

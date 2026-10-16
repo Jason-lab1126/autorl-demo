@@ -6,8 +6,8 @@ process, so the policy runs here and eval_student.py --policy smolvla sends it o
     conda activate lerobot-gpu
     python scripts/smolvla_server.py --checkpoint logs/smolvla/<run>/checkpoints/last/pretrained_model
 
-Each request is a dict with "image" (B, H, W, 3) uint8, "state" (B, 21) float32 and "task" (str);
-the reply is the action chunk (B, chunk_size, 8) float32 in environment units. Stops on "close".
+Each request is a dict with "image" (B, H, W, 3) uint8, "state" (B, 21) float32 and "task" (str),
+plus "crop" (B, C, C, 3) uint8 for a policy trained with the oracle crop as a second camera; the reply is the action chunk (B, chunk_size, 8) float32 in environment units. Stops on "close".
 """
 
 import argparse
@@ -30,17 +30,24 @@ policy = SmolVLAPolicy.from_pretrained(args.checkpoint).to(args.device).eval()
 preprocessor, postprocessor = make_pre_post_processors(
     policy.config, pretrained_path=args.checkpoint, preprocessor_overrides={"device_processor": {"device": args.device}}
 )
-# the camera key the policy was trained on (after the training rename map)
-image_key = next(iter(policy.config.image_features))
-print(f"[smolvla_server] loaded {args.checkpoint}; image key {image_key}; chunk {policy.config.chunk_size}", flush=True)
+# the camera keys the policy was trained on (after the training rename map)
+image_keys = list(policy.config.image_features)
+print(f"[smolvla_server] loaded {args.checkpoint}; image keys {image_keys}; chunk {policy.config.chunk_size}", flush=True)
+
+
+def to_pixels(images: np.ndarray) -> torch.Tensor:
+    return torch.from_numpy(images).to(args.device).permute(0, 3, 1, 2).float() / 255.0
 
 
 @torch.no_grad()
 def predict(request: dict) -> np.ndarray:
-    images = torch.from_numpy(request["image"]).to(args.device).permute(0, 3, 1, 2).float() / 255.0
     states = torch.from_numpy(request["state"]).to(args.device).float()
-    batch = preprocessor({"observation.images.front": images, "observation.state": states, "task": [request["task"]] * len(states)})
-    # the rename step in the preprocessor maps observation.images.front to the policy's key
+    observation = {"observation.images.front": to_pixels(request["image"]), "observation.state": states,
+                   "task": [request["task"]] * len(states)}
+    if "crop" in request:
+        observation["observation.images.crop"] = to_pixels(request["crop"])
+    batch = preprocessor(observation)
+    # the rename step in the preprocessor maps the dataset's camera keys to the policy's keys
     chunk = policy.predict_action_chunk(batch)  # (B, chunk_size, action_dim), normalized
     return postprocessor(chunk).float().cpu().numpy()
 

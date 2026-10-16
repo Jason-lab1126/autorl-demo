@@ -56,6 +56,7 @@ def make_vision_env(
     table_color: tuple | None = None,
     camera_shift: tuple = (0.0, 0.0, 0.0),
     randomizable: bool = False,
+    crop_render_size: int = 0,
 ):
     """Creates the lift-cube environment (wrapped for rsl_rl) with a camera added to every environment.
 
@@ -70,6 +71,9 @@ def make_vision_env(
     ``randomizable`` prepares the cube and table for per-environment recoloring at runtime (see
     :class:`VisualRandomizer`): every environment except one in five gets its own cube material, and
     likewise for the table (a different one in five), all bound before the simulation starts.
+
+    ``crop_render_size`` > 0 adds a second camera at the same pose that renders at that resolution,
+    for oracle crops around the cube (see :func:`oracle_crops`). The normal camera is unchanged.
     """
     env_cfg = parse_env_cfg(TASK, device=device, num_envs=num_envs)
     env_cfg.seed = seed
@@ -95,6 +99,10 @@ def make_vision_env(
         width=image_size,
         height=image_size,
     )
+    if crop_render_size > 0:
+        env_cfg.scene.crop_camera = env_cfg.scene.camera.replace(
+            prim_path="{ENV_REGEX_NS}/CropCamera", width=crop_render_size, height=crop_render_size
+        )
     if viewer_eye is not None:
         env_cfg.viewer.origin_type = "env"
         env_cfg.viewer.env_index = viewer_env_index
@@ -128,6 +136,8 @@ def make_vision_env(
     eyes = origins + torch.tensor(eye, device=origins.device) + shift
     targets = origins + torch.tensor(lookat, device=origins.device) + shift
     base_env.scene["camera"].set_world_poses_from_view(eyes, targets)
+    if crop_render_size > 0:
+        base_env.scene["crop_camera"].set_world_poses_from_view(eyes, targets)
     base_env.reset(seed=seed)
     return env
 
@@ -256,12 +266,49 @@ class VisualRandomizer:
         self.base_env.scene["camera"].set_world_poses_from_view(self.eyes + shifts, self.targets + shifts)
 
 
-def get_images(base_env) -> torch.Tensor:
+def get_images(base_env, camera: str = "camera") -> torch.Tensor:
     """Current camera images as (num_envs, H, W, 3) uint8."""
-    rgb = base_env.scene["camera"].data.output["rgb"][..., :3]
+    rgb = base_env.scene[camera].data.output["rgb"][..., :3]
     if rgb.dtype != torch.uint8:
         rgb = (rgb.clamp(0.0, 1.0) * 255.0).to(torch.uint8)
     return rgb
+
+
+def project_to_camera(points: torch.Tensor, size: int, eye: tuple = CAMERA_EYE, lookat: tuple = CAMERA_LOOKAT,
+                      focal_length: float = CAMERA_FOCAL_LENGTH, aperture: float = 20.955) -> torch.Tensor:
+    """Pixel coordinates (u right, v down) of points given in each environment's frame, (N, 3) -> (N, 2).
+
+    Pinhole model of the student camera (unshifted pose) in a size x size image.
+    """
+    eye_t = torch.tensor(eye, device=points.device, dtype=points.dtype)
+    forward = torch.tensor(lookat, device=points.device, dtype=points.dtype) - eye_t
+    forward = forward / forward.norm()
+    up = torch.tensor([0.0, 0.0, 1.0], device=points.device, dtype=points.dtype)
+    right = torch.linalg.cross(forward, up)
+    right = right / right.norm()
+    down = torch.linalg.cross(forward, right)
+    offset = points - eye_t
+    depth = offset @ forward
+    focal_px = size * focal_length / aperture
+    return torch.stack([size / 2 + focal_px * (offset @ right) / depth, size / 2 + focal_px * (offset @ down) / depth], dim=1)
+
+
+def oracle_crops(base_env, cube_pos: torch.Tensor, crop_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Crops of the high-resolution camera centered on the cube's TRUE position (privileged).
+
+    This stands in for a perfect cube detector. cube_pos is (N, 3) in the robot base frame (the
+    environment origin). Windows that would leave the image are shifted back inside it. Returns the
+    crops (N, crop_size, crop_size, 3) uint8 and the window centers in pixels (N, 2).
+    """
+    rgb = get_images(base_env, "crop_camera")
+    num, size = rgb.shape[0], rgb.shape[1]
+    center = project_to_camera(cube_pos.float(), size)
+    top_left = (center.round().long() - crop_size // 2).clamp(0, size - crop_size)
+    steps = torch.arange(crop_size, device=rgb.device)
+    rows = (top_left[:, 1, None] + steps)[:, :, None]
+    cols = (top_left[:, 0, None] + steps)[:, None, :]
+    crops = rgb[torch.arange(num, device=rgb.device)[:, None, None], rows, cols]
+    return crops, top_left.float() + crop_size / 2
 
 
 def student_state(teacher_obs: torch.Tensor) -> torch.Tensor:

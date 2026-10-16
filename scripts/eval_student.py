@@ -4,6 +4,8 @@ Same metric as eval_lift.py: cube-to-goal distance at the END of each episode, o
 environment, success if within --threshold. Pass --policy teacher to run the RL teacher in the
 same camera environment as a reference. Pass --policy smolvla to query a SmolVLA policy served by
 smolvla_server.py (conda env lerobot-gpu) on a local socket; it replans every --replan steps.
+With --crop_size C it also sends an oracle crop (C x C, from a --crop_render_size camera, centered
+on the cube's true position) as a second camera, for SmolVLA trained on such crops.
 
     python scripts/eval_student.py --student logs/student/bc_500ep/student.pt --out_dir results/student_bc \\
         --headless --device cuda:0
@@ -26,6 +28,8 @@ parser.add_argument("--student", type=str, default=None, help="Student checkpoin
 parser.add_argument("--server_port", type=int, default=47310, help="smolvla_server.py port (--policy smolvla).")
 parser.add_argument("--replan", type=int, default=10, help="Steps of each SmolVLA action chunk to execute before replanning.")
 parser.add_argument("--image_size", type=int, default=84, help="Camera resolution.")
+parser.add_argument("--crop_size", type=int, default=0, help="Send an oracle crop of this size to SmolVLA (0 = off).")
+parser.add_argument("--crop_render_size", type=int, default=512, help="Resolution of the camera the crop is taken from.")
 parser.add_argument("--num_envs", type=int, default=100, help="Number of episodes (one per environment).")
 parser.add_argument("--threshold", type=float, default=0.02, help="Success radius [m].")
 parser.add_argument("--seed", type=int, default=0)
@@ -54,7 +58,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import vision_env
 from student_policy import load_student
-from vision_env import EpisodeEndRecorder, get_images, make_vision_env, student_state
+from vision_env import EpisodeEndRecorder, cube_position, get_images, make_vision_env, oracle_crops, student_state
 
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg
 
@@ -66,6 +70,7 @@ def main():
     env = make_vision_env(
         args_cli.num_envs, args_cli.device, args_cli.seed, image_size=args_cli.image_size, light_scale=args_cli.light_scale,
         cube_color=args_cli.cube_color, table_color=args_cli.table_color, camera_shift=args_cli.camera_shift,
+        crop_render_size=args_cli.crop_render_size if args_cli.crop_size > 0 else 0,
     )
     base_env = env.unwrapped
     device = base_env.device
@@ -91,6 +96,9 @@ def main():
             nonlocal chunk
             if t % args_cli.replan == 0:
                 request = {"image": images().cpu().numpy(), "state": student_state(obs).cpu().numpy(), "task": INSTRUCTION}
+                if args_cli.crop_size > 0:
+                    # privileged: the crop window follows the simulator's true cube position
+                    request["crop"] = oracle_crops(base_env, cube_position(obs), args_cli.crop_size)[0].cpu().numpy()
                 connection.send(request)
                 chunk = torch.from_numpy(connection.recv()).to(device)
             return chunk[:, t % args_cli.replan]
@@ -137,6 +145,9 @@ def main():
     }
     if args_cli.policy == "smolvla":
         summary["replan_steps"] = args_cli.replan
+        if args_cli.crop_size > 0:
+            summary["oracle_crop"] = {"crop_size": args_cli.crop_size, "render_size": args_cli.crop_render_size,
+                                      "note": "crop centered on the simulator's true cube position, not a real detector"}
         connection.close()
     if views:
         import imageio.v2 as imageio

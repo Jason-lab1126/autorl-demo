@@ -9,7 +9,8 @@ Several raw files can be combined (--raw a.h5 b.h5). Training episodes of all fi
 first and validation episodes last, and the split is recorded in meta/info.json. --no_cube_position
 leaves out the privileged cube position (observation.environment_state), for training policies that
 read every observation they are given. After writing, the dataset is loaded back with
-LeRobotDataset and compared with the raw files.
+LeRobotDataset and compared with the raw files. Raw files with an oracle crop ("crop", see
+collect_lift_vision.py --crop_size) get it as a second camera, observation.images.crop.
 """
 
 import argparse
@@ -32,11 +33,14 @@ args = parser.parse_args()
 
 ACTION_NAMES = [f"arm_joint_{i}" for i in range(7)] + ["gripper"]
 IMAGE_KEY = "observation.images.front"
+CROP_KEY = "observation.images.crop"
 
 files = [h5py.File(path) for path in args.raw]
 instruction, fps = files[0].attrs["instruction"], int(files[0].attrs["fps"])
 state_names = files[0].attrs["state_names"].split(",")
 size = files[0]["image"].shape[1]
+has_crop = "crop" in files[0]
+assert all(("crop" in f) == has_crop for f in files), "only some raw files have an oracle crop"
 for f in files[1:]:
     assert (f.attrs["instruction"], int(f.attrs["fps"]), f.attrs["state_names"], f["image"].shape[1]) == \
         (instruction, fps, files[0].attrs["state_names"], size), "raw files differ in format"
@@ -55,6 +59,9 @@ features = {
     "observation.state": {"dtype": "float32", "shape": (len(state_names),), "names": state_names},
     "action": {"dtype": "float32", "shape": (len(ACTION_NAMES),), "names": ACTION_NAMES},
 }
+if has_crop:
+    crop = files[0]["crop"].shape[1]
+    features[CROP_KEY] = {"dtype": "video", "shape": (crop, crop, 3), "names": ["height", "width", "channels"]}
 if not args.no_cube_position:
     # privileged cube position in the robot base frame; the vision student never reads it
     features["observation.environment_state"] = {"dtype": "float32", "shape": (3,), "names": ["cube_x", "cube_y", "cube_z"]}
@@ -65,8 +72,11 @@ if not args.validate_only:
     for count, (f, episode, begin, length) in enumerate(order):
         images, states = f["image"][begin:begin + length], f["state"][begin:begin + length]
         cubes, actions = f["cube_position"][begin:begin + length], f["action"][begin:begin + length]
+        crops = f["crop"][begin:begin + length] if has_crop else None
         for i in range(length):
             frame = {IMAGE_KEY: images[i], "observation.state": states[i], "action": actions[i], "task": instruction}
+            if has_crop:
+                frame[CROP_KEY] = crops[i]
             if not args.no_cube_position:
                 frame["observation.environment_state"] = cubes[i]
             dataset.add_frame(frame)
@@ -99,7 +109,7 @@ report = {
 assert loaded.num_episodes == len(order) and loaded.num_frames == sum(item[3] for item in order)
 assert args.no_cube_position == ("observation.environment_state" not in loaded.features)
 rng = np.random.default_rng(0)
-state_err, action_err, image_err = 0.0, 0.0, []
+state_err, action_err, image_err, crop_err = 0.0, 0.0, [], []
 for index in rng.choice(loaded.num_frames, 200, replace=False):
     sample = loaded[int(index)]
     f, _, begin, _ = order[int(sample["episode_index"])]
@@ -108,6 +118,9 @@ for index in rng.choice(loaded.num_frames, 200, replace=False):
     action_err = max(action_err, float(np.abs(sample["action"].numpy() - f["action"][raw_index]).max()))
     decoded = sample[IMAGE_KEY].permute(1, 2, 0).numpy() * 255.0
     image_err.append(float(np.abs(decoded - f["image"][raw_index].astype(np.float32)).mean()))
+    if has_crop:
+        decoded = sample[CROP_KEY].permute(1, 2, 0).numpy() * 255.0
+        crop_err.append(float(np.abs(decoded - f["crop"][raw_index].astype(np.float32)).mean()))
     assert sample["task"] == instruction
 report.update({
     "checked_frames": 200,
@@ -115,6 +128,8 @@ report.update({
     "max_abs_action_error": action_err,
     "mean_abs_pixel_error_0_255": float(np.mean(image_err)),
 })
+if has_crop:
+    report["mean_abs_crop_pixel_error_0_255"] = float(np.mean(crop_err))
 assert state_err < 1e-5 and action_err < 1e-5, "state/action mismatch after export"
 with open(os.path.join(args.root, "validation_report.json"), "w") as fp:
     json.dump(report, fp, indent=2)

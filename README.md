@@ -10,7 +10,7 @@ What I found:
 - It breaks at specific points. A cube 5 times heavier is fine (94%) and one 10 times heavier is not (3%). Sensor noise wears it down steadily: 100, 97, 65, 28 and 1% as the noise goes from 0x to 1x, 2x, 3x and 5x.
 - A camera-only student can copy it. With 500 demonstrations it succeeds 44% of the time. With 1,250 it reaches 93%, against 100% for the teacher that is told where the cube is.
 - The camera-only student broke under any visual change: brighter light, a new table color or a camera moved 5 cm took it to 0%. Training on randomized visuals with a pretrained ResNet-18 recovered most of it, 53 to 81% under light and color changes, including ones never seen in training. Camera moves are still the weak point (16 to 46%).
-- A fine-tuned SmolVLA, a pretrained vision-language-action model, did much worse than the small CNN on the same data: 15% against 93%. Training its vision encoder as well raised that to 26%. Its actions are least accurate while the arm reaches for the cube, which points at how it sees the 84x84 image.
+- A fine-tuned SmolVLA, a pretrained vision-language-action model, did much worse than the small CNN on the same data: 15% against 93%. Training its vision encoder as well raised that to 26%. Giving it a sharp close-up of the cube as a second image did not help (15%), so not seeing the cube clearly is not the main cause.
 
 In the clip above both policies start from the same cube position and goal. The teacher ends 0.06 cm from the goal and the student 1.46 cm.
 
@@ -261,12 +261,13 @@ SmolVLA needs newer packages than Isaac Lab, so it runs in its own process. The 
 | SmolVLA | 1 step | 15% | 27.37 cm | 34.15 cm | 32% | 37% |
 | SmolVLA | 25 steps | 8% | 29.98 cm | 35.09 cm | 28% | 31% |
 | SmolVLA, vision encoder trained too | 10 steps | 26% | 23.29 cm | 24.63 cm | 47% | 48% |
+| SmolVLA + oracle crop of the cube (diagnostic) | 10 steps | 15% | 28.19 cm | 33.36 cm | 31% | 33% |
 
 ![One frame three ways: the 84x84 image, that image upscaled to 512x512 as SmolVLA sees it, and the scene rendered at 512x512, with the cube circled](results/resolution_comparison.png)
 
 The cube is only a few pixels in the 84x84 frame, and upscaling adds no detail.
 
-How often it replans barely matters. With the frozen encoder it never lifts the cube in most episodes. The last row is a second run, described below.
+How often it replans barely matters. With the frozen encoder it never lifts the cube in most episodes. The last two rows are separate runs, described below.
 
 Offline, against the teacher's actions on held-out frames, SmolVLA's error is about 5 times the CNN student's, and largest while the arm reaches for the cube.
 
@@ -312,12 +313,40 @@ The language layers stayed frozen as before. LeRobot's own option for this also 
 
 It reached 26% instead of 15%, and lifted the cube in 48% of episodes instead of 29%. With 100 episodes and one training run each, an 11-point difference is at the edge of what I can tell apart from noise. Offline, its error went down only a little, about 14% overall, and it is still 5 times the CNN student's while reaching for the cube.
 
-My take: letting the encoder adapt helps somewhat, but it is not the main fix. The model still sees an 84x84 image scaled up to 512x512, and it still cannot locate the cube as well as a small CNN trained from scratch. Higher-resolution images are the obvious next test, and I have not run them.
+My take: letting the encoder adapt helps somewhat, but it is not the main fix. The model still sees an 84x84 image scaled up to 512x512, and it still cannot locate the cube as well as a small CNN trained from scratch. Higher-resolution images are the obvious next test.
+
+### Diagnostic: an oracle crop of the cube
+
+This run tests whether SmolVLA fails because it cannot see the cube clearly. It is a diagnostic, not a usable policy: **the crop is an oracle crop using the simulator's true cube position, not a real detector.**
+
+I collected the same 1,250 teacher episodes again with a second camera at the same pose rendering at 512x512. The actions, cube positions and split match the first collection exactly. Every frame keeps the normal 84x84 view and adds a 128x128 crop of the 512x512 render, centered on the cube's true position projected into the camera. In the crop the cube is about 28 pixels wide, against about 5 in the 84x84 view. SmolVLA got both images as two cameras, with the frozen run's settings (frozen encoder, 20,000 steps, batch size 64). The eval used the same 100 episodes, with the crop taken from the true cube position at test time too.
+
+![The two images SmolVLA gets in the diagnostic: the 84x84 view with the crop window outlined, and the 128x128 crop centered on the cube](results/oracle_crop_example.png)
+
+It reached 15%, the same as the frozen run without the crop, and lifted the cube in 33% of episodes against 29%. Offline, its error is still 5.1 times the CNN student's, and 5.5 times while reaching for the cube. It does use the crop: with the crop of a different frame its error almost doubles (0.035 to 0.062), and with a black crop it triples.
+
+My take: a clear view of the cube did not fix it, so the low resolution is not the main cause. That rules out my first guess. The fault is more likely in how SmolVLA is set up for this task (the second guess) or in how it turns what it sees into precise arm motions. One caveat: the crop is always centered on the cube, so it shows what the cube looks like but not directly where it is. The model still has to get the position from the full view or from the background of the crop.
+
+<details>
+<summary>Details of the oracle-crop run</summary>
+
+Training took 5 hours 54 minutes on one RTX 3090. The final training loss was 0.025, the same as the frozen run's. In about 5% of frames the cube is near the edge of the image, and the crop window is shifted back inside the image, so the cube is off-center there.
+
+| Part of the episode | CNN student | SmolVLA + true crop | Crop of another frame | Black crop |
+|---|---|---|---|---|
+| All frames | 0.0068 | 0.0346 | 0.0624 | 0.1081 |
+| Frames 0 to 49 (reaching for the cube) | 0.0235 | 0.1297 | 0.2660 | 0.4929 |
+| Frames 50 to 99 (grasping and lifting) | 0.0040 | 0.0143 | 0.0153 | 0.0153 |
+| Frames 100 to 249 (carrying and holding) | 0.0022 | 0.0097 | 0.0103 | 0.0107 |
+
+Same frames and units as the offline table above. The SmolVLA columns use images decoded from the LeRobot videos, and the CNN column the lossless images.
+
+</details>
 
 <details>
 <summary>Result files</summary>
 
-The results are in [`results/smolvla_1250_84/`](results/smolvla_1250_84/), [`results/smolvla_1250_84_replan1/`](results/smolvla_1250_84_replan1/), [`results/smolvla_1250_84_replan25/`](results/smolvla_1250_84_replan25/), [`results/smolvla_1250_84_vision/`](results/smolvla_1250_84_vision/), [`results/offline_action_check.json`](results/offline_action_check.json) and [`results/offline_action_check_vision.json`](results/offline_action_check_vision.json). The figure comes from `scripts/render_resolution_frame.py` and `scripts/make_resolution_figure.py`.
+The results are in [`results/smolvla_1250_84/`](results/smolvla_1250_84/), [`results/smolvla_1250_84_replan1/`](results/smolvla_1250_84_replan1/), [`results/smolvla_1250_84_replan25/`](results/smolvla_1250_84_replan25/), [`results/smolvla_1250_84_vision/`](results/smolvla_1250_84_vision/), [`results/offline_action_check.json`](results/offline_action_check.json) and [`results/offline_action_check_vision.json`](results/offline_action_check_vision.json). The oracle-crop run is in [`results/smolvla_1250_oracle_crop/`](results/smolvla_1250_oracle_crop/) and [`results/offline_crop_check.json`](results/offline_crop_check.json), from [`scripts/run_oracle_crop.sh`](scripts/run_oracle_crop.sh). The figures come from `scripts/render_resolution_frame.py`, `scripts/make_resolution_figure.py` and `scripts/make_oracle_crop_figure.py`.
 
 </details>
 
@@ -328,12 +357,12 @@ The results are in [`results/smolvla_1250_84/`](results/smolvla_1250_84/), [`res
 - Lighting and colors are now partly handled (53 to 81%, against 86% on the unchanged scene), but I only randomized light intensity and flat colors, not textures, shadows or clutter.
 - Camera pose is still the main gap: 46% with the camera moved 5 cm and 16% at 12 cm.
 - The student still gets exact joint readings and the goal as numbers. Only the cube has to come from the image.
-- SmolVLA was tested only with 84x84 images, one training run per setup. The result says these setups do not work, not that SmolVLA cannot do the task.
+- SmolVLA was tested with 84x84 images and, as a diagnostic, an oracle crop of the cube. One training run per setup. The result says these setups do not work, not that SmolVLA cannot do the task.
 
 ## Next steps
 
 - Make the student robust to camera moves: a second camera, or randomizing the camera pose more widely.
-- Train SmolVLA on higher-resolution images, the main remaining suspect for its poor results.
+- Find what limits SmolVLA here, now that a clear view of the cube did not help: try it with a state and camera setup closer to what it was pretrained on.
 - Move to harder tasks like stacking, with a language model proposing the reward functions and this evaluation scoring them.
 
 ## Reproducing
@@ -461,6 +490,10 @@ python scripts/eval_student.py --policy smolvla --out_dir results/smolvla_1250_8
 conda activate lerobot-gpu
 TRAIN_VISION=1 ./scripts/train_smolvla.sh datasets/lift_cube_franka_lerobot_1250_84 logs/smolvla/smolvla_1250_84_vision \
     --steps=30000 --batch_size=32 --save_freq=5000 --log_freq=200 --num_workers=8
+
+# SmolVLA oracle-crop diagnostic: collect with the crop, export, fine-tune, eval (about 7 hours), then the offline check
+./scripts/run_oracle_crop.sh
+python scripts/offline_crop_check.py --smolvla logs/smolvla/smolvla_1250_oracle_crop/checkpoints/last/pretrained_model
 
 # record a student rollout
 python scripts/record_student_video.py --policy student --student logs/student/bc_more_teacher/student.pt \
