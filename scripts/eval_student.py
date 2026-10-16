@@ -5,7 +5,8 @@ environment, success if within --threshold. Pass --policy teacher to run the RL 
 same camera environment as a reference. Pass --policy smolvla to query a SmolVLA policy served by
 smolvla_server.py (conda env lerobot-gpu) on a local socket; it replans every --replan steps.
 With --crop_size C it also sends an oracle crop (C x C, from a --crop_render_size camera, centered
-on the cube's true position) as a second camera, for SmolVLA trained on such crops.
+on the cube's true position) as a second camera, for SmolVLA trained on such crops. With
+--oracle_state it appends the true cube position to the state, for SmolVLA trained that way.
 
     python scripts/eval_student.py --student logs/student/bc_500ep/student.pt --out_dir results/student_bc \\
         --headless --device cuda:0
@@ -29,6 +30,7 @@ parser.add_argument("--server_port", type=int, default=47310, help="smolvla_serv
 parser.add_argument("--replan", type=int, default=10, help="Steps of each SmolVLA action chunk to execute before replanning.")
 parser.add_argument("--image_size", type=int, default=84, help="Camera resolution.")
 parser.add_argument("--crop_size", type=int, default=0, help="Send an oracle crop of this size to SmolVLA (0 = off).")
+parser.add_argument("--oracle_state", action="store_true", help="Append the true cube position to SmolVLA's state.")
 parser.add_argument("--crop_render_size", type=int, default=512, help="Resolution of the camera the crop is taken from.")
 parser.add_argument("--num_envs", type=int, default=100, help="Number of episodes (one per environment).")
 parser.add_argument("--threshold", type=float, default=0.02, help="Success radius [m].")
@@ -95,7 +97,11 @@ def main():
         def act(obs, t):
             nonlocal chunk
             if t % args_cli.replan == 0:
-                request = {"image": images().cpu().numpy(), "state": student_state(obs).cpu().numpy(), "task": INSTRUCTION}
+                state = student_state(obs)
+                if args_cli.oracle_state:
+                    # privileged: the simulator's true cube position
+                    state = torch.cat([state, cube_position(obs)], dim=1)
+                request = {"image": images().cpu().numpy(), "state": state.cpu().numpy(), "task": INSTRUCTION}
                 if args_cli.crop_size > 0:
                     # privileged: the crop window follows the simulator's true cube position
                     request["crop"] = oracle_crops(base_env, cube_position(obs), args_cli.crop_size)[0].cpu().numpy()
@@ -145,6 +151,8 @@ def main():
     }
     if args_cli.policy == "smolvla":
         summary["replan_steps"] = args_cli.replan
+        if args_cli.oracle_state:
+            summary["oracle_state"] = "true cube position appended to the state, not available to a real robot"
         if args_cli.crop_size > 0:
             summary["oracle_crop"] = {"crop_size": args_cli.crop_size, "render_size": args_cli.crop_render_size,
                                       "note": "crop centered on the simulator's true cube position, not a real detector"}

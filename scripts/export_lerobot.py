@@ -11,6 +11,8 @@ leaves out the privileged cube position (observation.environment_state), for tra
 read every observation they are given. After writing, the dataset is loaded back with
 LeRobotDataset and compared with the raw files. Raw files with an oracle crop ("crop", see
 collect_lift_vision.py --crop_size) get it as a second camera, observation.images.crop.
+--cube_in_state appends the true cube position to observation.state (an oracle state, for a
+diagnostic: the policy then does not need to find the cube in the image).
 """
 
 import argparse
@@ -28,6 +30,7 @@ parser.add_argument("--repo_id", type=str, default="Jason-lab1126/lift_cube_fran
 parser.add_argument("--video_backend", type=str, default="pyav", help="Decoder used when loading the dataset back.")
 parser.add_argument("--vcodec", type=str, default="libsvtav1", help="Video codec; h264 encodes much faster at larger sizes.")
 parser.add_argument("--no_cube_position", action="store_true", help="Leave out observation.environment_state.")
+parser.add_argument("--cube_in_state", action="store_true", help="Append the true cube position to observation.state.")
 parser.add_argument("--validate_only", action="store_true", help="Skip writing; only load and check an existing export.")
 args = parser.parse_args()
 
@@ -38,12 +41,16 @@ CROP_KEY = "observation.images.crop"
 files = [h5py.File(path) for path in args.raw]
 instruction, fps = files[0].attrs["instruction"], int(files[0].attrs["fps"])
 state_names = files[0].attrs["state_names"].split(",")
+raw_state_names = files[0].attrs["state_names"]
+CUBE_NAMES = ["cube_x", "cube_y", "cube_z"]
+if args.cube_in_state:
+    state_names = state_names + CUBE_NAMES
 size = files[0]["image"].shape[1]
 has_crop = "crop" in files[0]
 assert all(("crop" in f) == has_crop for f in files), "only some raw files have an oracle crop"
 for f in files[1:]:
     assert (f.attrs["instruction"], int(f.attrs["fps"]), f.attrs["state_names"], f["image"].shape[1]) == \
-        (instruction, fps, files[0].attrs["state_names"], size), "raw files differ in format"
+        (instruction, fps, raw_state_names, size), "raw files differ in format"
 # (file, episode, start frame, length) for every episode, training episodes of all files first
 train, val = [], []
 for f in files:
@@ -64,7 +71,7 @@ if has_crop:
     features[CROP_KEY] = {"dtype": "video", "shape": (crop, crop, 3), "names": ["height", "width", "channels"]}
 if not args.no_cube_position:
     # privileged cube position in the robot base frame; the vision student never reads it
-    features["observation.environment_state"] = {"dtype": "float32", "shape": (3,), "names": ["cube_x", "cube_y", "cube_z"]}
+    features["observation.environment_state"] = {"dtype": "float32", "shape": (3,), "names": CUBE_NAMES}
 
 if not args.validate_only:
     dataset = LeRobotDataset.create(repo_id=args.repo_id, root=args.root, fps=fps, robot_type="franka_panda",
@@ -72,6 +79,8 @@ if not args.validate_only:
     for count, (f, episode, begin, length) in enumerate(order):
         images, states = f["image"][begin:begin + length], f["state"][begin:begin + length]
         cubes, actions = f["cube_position"][begin:begin + length], f["action"][begin:begin + length]
+        if args.cube_in_state:
+            states = np.concatenate([states, cubes], axis=1)
         crops = f["crop"][begin:begin + length] if has_crop else None
         for i in range(length):
             frame = {IMAGE_KEY: images[i], "observation.state": states[i], "action": actions[i], "task": instruction}
@@ -114,7 +123,10 @@ for index in rng.choice(loaded.num_frames, 200, replace=False):
     sample = loaded[int(index)]
     f, _, begin, _ = order[int(sample["episode_index"])]
     raw_index = begin + int(sample["frame_index"])
-    state_err = max(state_err, float(np.abs(sample["observation.state"].numpy() - f["state"][raw_index]).max()))
+    raw_state = f["state"][raw_index]
+    if args.cube_in_state:
+        raw_state = np.concatenate([raw_state, f["cube_position"][raw_index]])
+    state_err = max(state_err, float(np.abs(sample["observation.state"].numpy() - raw_state).max()))
     action_err = max(action_err, float(np.abs(sample["action"].numpy() - f["action"][raw_index]).max()))
     decoded = sample[IMAGE_KEY].permute(1, 2, 0).numpy() * 255.0
     image_err.append(float(np.abs(decoded - f["image"][raw_index].astype(np.float32)).mean()))

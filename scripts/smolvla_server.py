@@ -6,7 +6,8 @@ process, so the policy runs here and eval_student.py --policy smolvla sends it o
     conda activate lerobot-gpu
     python scripts/smolvla_server.py --checkpoint logs/smolvla/<run>/checkpoints/last/pretrained_model
 
-Each request is a dict with "image" (B, H, W, 3) uint8, "state" (B, 21) float32 and "task" (str),
+Each request is a dict with "image" (B, H, W, 3) uint8, "state" (B, 21, or 24 with the oracle cube
+position) float32 and "task" (str),
 plus "crop" (B, C, C, 3) uint8 for a policy trained with the oracle crop as a second camera; the reply is the action chunk (B, chunk_size, 8) float32 in environment units. Stops on "close".
 """
 
