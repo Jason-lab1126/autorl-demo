@@ -10,7 +10,7 @@ What I found:
 - It breaks at specific points. A cube 5 times heavier is fine (94%) and one 10 times heavier is not (3%). Sensor noise wears it down steadily: 100, 97, 65, 28 and 1% as the noise goes from 0x to 1x, 2x, 3x and 5x.
 - A camera-only student can copy it. With 500 demonstrations it succeeds 44% of the time. With 1,250 it reaches 93%, against 100% for the teacher that is told where the cube is.
 - The camera-only student broke under any visual change: brighter light, a new table color or a camera moved 5 cm took it to 0%. Training on randomized visuals with a pretrained ResNet-18 recovered most of it, 53 to 81% under light and color changes, including ones never seen in training. Camera moves are still the weak point (16 to 46%).
-- A fine-tuned SmolVLA, a pretrained vision-language-action model, did much worse than the small CNN on the same data: 15% against 93%. Its actions are least accurate while the arm reaches for the cube, which points at how it sees the 84x84 image.
+- A fine-tuned SmolVLA, a pretrained vision-language-action model, did much worse than the small CNN on the same data: 15% against 93%. Training its vision encoder as well raised that to 26%. Its actions are least accurate while the arm reaches for the cube, which points at how it sees the 84x84 image.
 
 In the clip above both policies start from the same cube position and goal. The teacher ends 0.06 cm from the goal and the student 1.46 cm.
 
@@ -215,19 +215,20 @@ SmolVLA needs newer packages than Isaac Lab, so it runs in its own process. The 
 | SmolVLA | 10 steps | 15% | 30.75 cm | 36.57 cm | 29% | 29% |
 | SmolVLA | 1 step | 15% | 27.37 cm | 34.15 cm | 32% | 37% |
 | SmolVLA | 25 steps | 8% | 29.98 cm | 35.09 cm | 28% | 31% |
+| SmolVLA, vision encoder trained too | 10 steps | 26% | 23.29 cm | 24.63 cm | 47% | 48% |
 
-How often it replans barely matters. In most episodes it never lifts the cube.
+How often it replans barely matters. With the frozen encoder it never lifts the cube in most episodes. The last row is a second run, described below.
 
 To see why, I compared both models with the teacher's actions on the 125 held-out episodes, every 5th frame (6,250 frames), with no simulator in the loop. The error is the mean squared error with each action dimension divided by its spread in the teacher's actions.
 
-| Part of the episode | CNN student | SmolVLA | Ratio |
-|---|---|---|---|
-| All frames | 0.0068 | 0.0357 | 5.2x |
-| Frames 0 to 49 (reaching for the cube) | 0.0235 | 0.1424 | 6.1x |
-| Frames 50 to 99 (grasping and lifting) | 0.0040 | 0.0128 | 3.2x |
-| Frames 100 to 249 (carrying and holding) | 0.0022 | 0.0078 | 3.5x |
+| Part of the episode | CNN student | SmolVLA | Ratio | SmolVLA, encoder trained | Ratio |
+|---|---|---|---|---|---|
+| All frames | 0.0068 | 0.0357 | 5.2x | 0.0307 | 4.5x |
+| Frames 0 to 49 (reaching for the cube) | 0.0235 | 0.1424 | 6.1x | 0.1210 | 5.1x |
+| Frames 50 to 99 (grasping and lifting) | 0.0040 | 0.0128 | 3.2x | 0.0113 | 2.8x |
+| Frames 100 to 249 (carrying and holding) | 0.0022 | 0.0078 | 3.5x | 0.0071 | 3.2x |
 
-Both models open and close the gripper at the right time on over 99.9% of frames. The gap is in the arm, and it is largest early in the episode. That is when the policy has to find the cube in the image, since its position is not in the state. Small errors there add up in closed loop: the arm arrives at the wrong place and misses the grasp.
+All three open and close the gripper at the right time on over 99.9% of frames. The gap is in the arm, and it is largest early in the episode. That is when the policy has to find the cube in the image, since its position is not in the state. Small errors there add up in closed loop: the arm arrives at the wrong place and misses the grasp.
 
 The CNN student finds the cube from the same 84x84 pixels, so the information is in the image. My guesses for why SmolVLA does not use it, most likely first:
 
@@ -235,7 +236,15 @@ The CNN student finds the cube from the same 84x84 pixels, so the information is
 2. The base model is set up for three cameras at 256x256 and a 6-number state. Here it gets one small camera and 21 numbers.
 3. Training was short, 4.5 passes over the data. Since the loss had flattened, I doubt more steps on the same data would change much.
 
-I did not test these guesses. Each would need another 4-hour training run, and a higher-resolution test would also need new data. The results are in [`results/smolvla_1250_84/`](results/smolvla_1250_84/), [`results/smolvla_1250_84_replan1/`](results/smolvla_1250_84_replan1/), [`results/smolvla_1250_84_replan25/`](results/smolvla_1250_84_replan25/) and [`results/offline_action_check.json`](results/offline_action_check.json).
+### Training the vision encoder too
+
+To test the first guess, I trained a second SmolVLA with the vision encoder unfrozen as well (186M trainable parameters). The language layers stayed frozen as before. LeRobot's own option for this also unfreezes the language layers, so I used a short wrapper that only changes the vision encoder. Batch size 64 did not fit in the GPU memory left next to another user's job, so this run used batch size 32 for 30,000 steps: 3.4 passes over the data, 6 hours 49 minutes.
+
+It reached 26% instead of 15%, and lifted the cube in 48% of episodes instead of 29%. With 100 episodes each, a difference of 11 points is at the edge of what I can tell apart from noise, and each number comes from one training run. Offline, its error went down only a little, about 14% overall, and it is still 5 times the CNN student's while reaching for the cube. The final training loss was the same as the frozen run's (0.025).
+
+My take: letting the encoder adapt helps somewhat, but it is not the main fix. The model still sees an 84x84 image scaled up to 512x512, and it still cannot locate the cube as well as a small CNN trained from scratch. Higher-resolution images are the obvious next test, and I have not run them.
+
+The results are in [`results/smolvla_1250_84/`](results/smolvla_1250_84/), [`results/smolvla_1250_84_replan1/`](results/smolvla_1250_84_replan1/), [`results/smolvla_1250_84_replan25/`](results/smolvla_1250_84_replan25/), [`results/smolvla_1250_84_vision/`](results/smolvla_1250_84_vision/), [`results/offline_action_check.json`](results/offline_action_check.json) and [`results/offline_action_check_vision.json`](results/offline_action_check_vision.json).
 
 ## Limitations
 
@@ -244,12 +253,12 @@ I did not test these guesses. Each would need another 4-hour training run, and a
 - Lighting and colors are now partly handled: the randomized ResNet-18 student keeps 53 to 81% under those changes, against 86% on the unchanged scene. I only randomized light intensity and flat cube and table colors, not textures, shadows or clutter, and the scene is otherwise plain.
 - Camera pose is still the main gap. The student drops to 46% with the camera moved 5 cm and 16% at 12 cm, so a real setup would need a carefully fixed camera or more work here.
 - The student still gets exact joint readings and the goal as numbers. Only the cube has to come from the image.
-- SmolVLA was tested in one setup only: 84x84 images, a frozen vision encoder and one training run. The result says this setup does not work, not that SmolVLA cannot do the task.
+- SmolVLA was tested only with 84x84 images, one training run per setup. The result says these setups do not work, not that SmolVLA cannot do the task.
 
 ## Next steps
 
 - Make the student robust to camera moves: a second camera, or randomizing the camera pose more widely.
-- Find out why SmolVLA underperforms: fine-tune its vision encoder too, or train on higher-resolution images.
+- Train SmolVLA on higher-resolution images, the main remaining suspect for its poor results.
 - Move to harder tasks like stacking, with a language model proposing the reward functions and this evaluation scoring them.
 
 ## Reproducing
@@ -372,6 +381,11 @@ python scripts/offline_action_check.py --smolvla $SMOLVLA --student logs/student
 python scripts/smolvla_server.py --checkpoint $SMOLVLA &
 source env.sh
 python scripts/eval_student.py --policy smolvla --out_dir results/smolvla_1250_84 --headless --device cuda:0
+
+# SmolVLA with the vision encoder trained too (about 7 hours at batch size 32), then the same server and eval
+conda activate lerobot-gpu
+TRAIN_VISION=1 ./scripts/train_smolvla.sh datasets/lift_cube_franka_lerobot_1250_84 logs/smolvla/smolvla_1250_84_vision \
+    --steps=30000 --batch_size=32 --save_freq=5000 --log_freq=200 --num_workers=8
 
 # record a student rollout
 python scripts/record_student_video.py --policy student --student logs/student/bc_more_teacher/student.pt \

@@ -1,0 +1,25 @@
+{
+  "policy": "smolvla",
+  "checkpoint": "smolvla server on port 47310",
+  "task": "Isaac-Lift-Cube-Franka-Play-v0",
+  "num_episodes": 100,
+  "threshold_m": 0.02,
+  "success_rate": 0.25999999046325684,
+  "final_dist_mean_m": 0.23291249573230743,
+  "final_dist_median_m": 0.2463071197271347,
+  "final_dist_max_m": 0.6479671597480774,
+  "success_rate_5cm": 0.4699999988079071,
+  "lifted_rate": 0.47999998927116394,
+  "dropped_rate": 0.0,
+  "seed": 0,
+  "light_scale": 1.0,
+  "cube_color": null,
+  "table_color": null,
+  "camera_shift_m": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "image_size": 84,
+  "replan_steps": 10
+}
