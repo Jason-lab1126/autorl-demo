@@ -47,7 +47,7 @@ flowchart LR
 
 ### Training
 
-The task is Isaac Lab's `Isaac-Lift-Cube-Franka-v0`: a Franka Panda picks up a cube and holds it at a goal position for a 5-second episode. The teacher reads 36 numbers (joint state, cube position, goal, last action) and outputs 8 (7 arm joint targets and a gripper command). I trained it with PPO for 1500 iterations on 4096 parallel environments, 27 minutes on one RTX 3090.
+The task is Isaac Lab's `Isaac-Lift-Cube-Franka-v0`: a Franka Panda picks up a cube and holds it at a goal position for a 5-second episode. The teacher sees the cube position directly (inputs and outputs are under "Task details" at the end). I trained it with PPO for 1500 iterations on 4096 parallel environments, 27 minutes on one RTX 3090.
 
 ![Mean episode reward vs. training iteration for both training runs](results/training_curve.png)
 
@@ -55,13 +55,20 @@ The baseline reaches a mean episode reward of 152.2. The second line is the nois
 
 ### How I evaluate
 
-Success means the cube ends the episode within 2 cm of the goal. Each cell is 100 episodes with the same seed, so every cell sees the same goals. With 100 episodes, a rate near 50% carries about ±10 points of sampling uncertainty. The plots show 95% Wilson intervals.
+Success means the cube ends the episode within 2 cm of the goal. Each cell is 100 episodes with the same seed, and I perturb one thing at a time.
 
-I perturb one thing at a time: cube mass, friction of the cube and fingers, noise on the observations (1x is 0.01 rad on joint positions, 0.1 rad/s on joint velocities, 1 cm on cube position), noise on the actions, and the size of the cube's spawn area.
+<details>
+<summary>Evaluation details</summary>
+
+Every cell sees the same goals. With 100 episodes, a rate near 50% carries about ±10 points of sampling uncertainty. The plots show 95% Wilson intervals.
+
+The perturbations: cube mass, friction of the cube and fingers, noise on the observations (1x is 0.01 rad on joint positions, 0.1 rad/s on joint velocities, 1 cm on cube position), noise on the actions, and the size of the cube's spawn area.
+
+</details>
 
 ### Robustness
 
-The final policy handles a cube up to 5 times heavier (94%) but fails at 10 times (3%), and friction has the same kind of cliff: 99% at half friction, 65% at 0.2x, 2% at a tenth. Sensor noise wears it down steadily instead, while action noise and a wider spawn area are tolerated best (80% and 83% at the strong levels). More training buys robustness as well as precision: at 5x mass the iteration-500 policy keeps 57% of its own unperturbed success (41 of 72), and the final policy keeps 94%.
+The final policy handles a cube up to 5 times heavier (94%) but fails at 10 times (3%), and friction has the same kind of cliff: 99% at half friction, 65% at 0.2x, 2% at a tenth. Sensor noise wears it down steadily instead, while action noise and a wider spawn area are tolerated best (80% and 83% at the strong levels).
 
 ![Success rate vs. observation noise, one line per checkpoint](results/success_vs_obs_noise.png)
 
@@ -91,6 +98,8 @@ Success rate [%] by training checkpoint. Iteration 100 is 0% in every row.
 | Spawn range | medium (x1.5) | 3 | 65 | 99 |
 | | strong (x2) | 0 | 60 | 83 |
 
+More training buys robustness as well as precision: at 5x mass the iteration-500 policy keeps 57% of its own unperturbed success (41 of 72), and the final policy keeps 94%.
+
 Precision arrives late. At iteration 300 the policy already lifts the cube (9 cm from the goal on average, down from 77 cm at iteration 100), but only 1% of episodes end within 2 cm.
 
 Mean final distances are in [`results/eval_matrix.md`](results/eval_matrix.md) and all per-cell statistics in [`results/eval_matrix_cells.csv`](results/eval_matrix_cells.csv).
@@ -103,6 +112,11 @@ I trained a second teacher with observation noise drawn from 0x to 3x each episo
 
 ![Success rate vs. observation noise for the baseline and the noise-trained policy at 1500 and 3000 iterations](results/success_vs_obs_noise_compare.png)
 
+Noise training first made the policy robust but imprecise: it stopped 3.2 to 3.6 cm from the goal whatever the noise level. Training longer recovered most of the precision. What is left is a clear tradeoff: worse than the baseline at low noise, much better at high noise.
+
+<details>
+<summary>Noise-training table and caveats</summary>
+
 Success rate, with mean final distance in brackets:
 
 | Noise | Baseline, 1500 it | Noise-trained, 1500 it | Noise-trained, 3000 it |
@@ -113,11 +127,11 @@ Success rate, with mean final distance in brackets:
 | x3 | 28% (12.24 cm) | 18% (3.35 cm) | 49% (4.58 cm) |
 | x5 | 1% (42.39 cm) | 16% (10.76 cm) | 15% (14.42 cm) |
 
-Noise training first made the policy robust but imprecise: it stopped 3.2 to 3.6 cm from the goal whatever the noise level. Training longer recovered most of the precision. What is left is a clear tradeoff: worse than the baseline at low noise, much better at high noise.
-
 The training reward barely moved between 1500 and 3000 iterations (118.9 to 119.4) while the evaluated precision improved a lot. That is why I evaluate separately instead of reading results off the training curve.
 
 Two caveats. I resumed the 3000-iteration policy from a checkpoint, which restarts the task's penalty curriculum. And I did not train the baseline to 3000 iterations.
+
+</details>
 
 ## Part 2: the student
 
@@ -135,9 +149,16 @@ It outputs the same 8-number action as the teacher. The model is a small CNN for
 
 ### Data
 
-I rolled out the teacher with a little noise on its actions (std 0.1) so it visits more states, and recorded the action it wanted to take as the label. The first set is 500 episodes (125,000 frames), split 450/50 by episode.
+I rolled out the teacher with a little noise on its actions (std 0.1) so it visits more states, and recorded the action it wanted to take as the label.
+
+<details>
+<summary>Dataset details</summary>
+
+The first set is 500 episodes (125,000 frames), split 450/50 by episode.
 
 The same 500 episodes are exported as a LeRobot dataset (format v3.0) with the instruction "pick up the cube and move it to the target", written and re-loaded with LeRobot's own code. The datasets are not in this repository.
+
+</details>
 
 ### Results
 
@@ -152,6 +173,11 @@ Closed-loop, 100 episodes each, same seed and metric as the teacher's eval:
 | BC + DAgger round 2 | 1000 | 72% | 8.39 cm | 1.25 cm | 83% |
 | BC + DAgger round 3 | 1250 | 88% | 3.42 cm | 0.92 cm | 95% |
 
+BC is behavior cloning on teacher rollouts. More teacher data did about as well as DAgger at the same number of episodes (93% against 88%).
+
+<details>
+<summary>DAgger, failure cases and notes</summary>
+
 The teacher's 0.32 cm here and 0.31 cm in Part 1 come from two separate runs of the same 100 episodes, which do not reproduce to the last digit. I round it to 0.3 cm in the summary.
 
 BC is behavior cloning on teacher rollouts. In each DAgger round the current student drives for 250 episodes, the teacher labels what it should have done, and a new student is trained on everything so far. The "more teacher data" row adds 750 teacher episodes instead, so both end at 1,250.
@@ -160,11 +186,13 @@ I expected DAgger to win. At matched data, plain BC on noise-injected teacher da
 
 The best student still fails 7 of 100 episodes. In 3 it never grasps the cube, and in 4 it lifts it but stops 2.3 to 4.4 cm from the goal. [Here is one of the missed grasps](media/student_failure.mp4): the arm reaches past the cube and ends 44.5 cm from the goal.
 
+</details>
+
 More clips: [student close-up (mp4)](media/student_closeup_10s.mp4) · [teacher close-up (mp4)](logs/rsl_rl/franka_lift/2026-10-13_15-19-32_ppo_baseline/videos/play/closeup_1env_10s_clean.mp4) · [teacher, 16 environments (mp4)](logs/rsl_rl/franka_lift/2026-10-13_15-19-32_ppo_baseline/videos/play/play_16env_10s.mp4). Full table: [`results/student_comparison.md`](results/student_comparison.md).
 
 ### What the student depends on
 
-I re-ran the best student and the teacher with changes that only affect what the camera sees: dimmer and brighter light, a different cube color, a different table color, and the camera moved sideways. Each cell is 100 episodes with the same seed and metric as before. Student cells show success, with mean final distance in brackets.
+I re-ran the best student and the teacher with changes that only affect what the camera sees. Each cell is 100 episodes. Student cells show success, with mean final distance in brackets.
 
 | Change | Held out | Teacher | Student, fixed scene | Randomized, small CNN | Randomized, ResNet-18 |
 |---|---|---|---|---|---|
@@ -184,7 +212,12 @@ I re-ran the best student and the teacher with changes that only affect what the
 
 The teacher ignores all of these, because it never looks at the image. The first student depends on them completely. A brighter light, a lighter table or a camera moved by 5 cm takes it from 90% to 0%, and it mostly stops lifting the cube at all. A camera-based policy trained on one fixed scene is not ready for a real robot.
 
-To fix this I collected 1,251 new teacher episodes with the visuals randomized per episode: light intensity from x0.5 to x2, random cube and table colors (hues from red to blue, so purple and magenta stay unseen), and the camera moved in a random direction by up to 10 cm. One environment in five kept the original cube and another one in five the original table. The "held out" rows are outside those ranges.
+To fix this I collected new teacher episodes with randomized light, colors and camera position. A small CNN failed to learn from them. An ImageNet-pretrained ResNet-18 worked on the second attempt, and that student is the last column.
+
+<details>
+<summary>The randomized data and the three students</summary>
+
+I collected 1,251 new teacher episodes with the visuals randomized per episode: light intensity from x0.5 to x2, random cube and table colors (hues from red to blue, so purple and magenta stay unseen), and the camera moved in a random direction by up to 10 cm. One environment in five kept the original cube and another one in five the original table. The "held out" rows are outside those ranges.
 
 With the same small CNN and 20 epochs this did not work. That student fails everywhere, including on the unchanged scene (1%). It was underfitting: its error on its own training data was about 3 times the first student's.
 
@@ -193,19 +226,31 @@ I then made two attempts with a larger model:
 1. An ImageNet-pretrained ResNet-18, fine-tuned, with random 76x76 crops of the 84x84 image during training and the center crop at test time. Up to 50 epochs, keeping the checkpoint with the lowest validation loss. I added the 500 original fixed-scene episodes to the randomized ones. This reached 58% on the unchanged scene, so I did not run the other conditions.
 2. The same model, with all 1,250 fixed-scene episodes the first student was trained on plus the 1,251 randomized ones, for 30 epochs. This reached 86% on the unchanged scene, close to the first student's 90%, so I ran the full table. That is the last column.
 
+</details>
+
 My take: visual randomization works once the model is big enough to absorb it, and it costs little on the original scene. Light and color changes went from mostly 0% to between 53% and 81%, including changes it never saw in training (light x3, purple cube, purple table). Moving the camera is still the weak point: 46% at 5 cm, 22% at 10 cm and 16% at 12 cm, even though offsets up to 10 cm were in the training data. The policy has to turn image positions into arm motions, and a moved camera changes that mapping, not just how things look. For a real robot I would fix the camera mount carefully or give the student a second view, rather than count on randomization alone.
+
+<details>
+<summary>Caveats and files</summary>
 
 Caveats: each column is one training run with one seed and 100 episodes per cell. The last student also saw more original-scene data than the failed attempts, so I cannot say how much of the gain comes from the model and how much from the data.
 
 The 90% in the first row and the 93% in the student table above are two separate runs of the same 100 episodes, which do not reproduce exactly. Per-run results are in [`results/visual/`](results/visual/), the table in [`results/visual_robustness.md`](results/visual_robustness.md) and the fit numbers for all three randomized students in [`results/visual_rand_diagnostics.json`](results/visual_rand_diagnostics.json).
 
+</details>
+
 ## Part 3: SmolVLA, a negative result
 
-I fine-tuned [SmolVLA](https://huggingface.co/lerobot/smolvla_base) (450M parameters) on the LeRobot export of the same 1,250 fixed-scene episodes the best CNN student used, with the same 1,125/125 split by episode. It gets the same 84x84 image, the same 21 numbers including the goal, and the instruction "pick up the cube and move it to the target". It outputs 50 actions at a time.
+I fine-tuned [SmolVLA](https://huggingface.co/lerobot/smolvla_base) (450M parameters) on the LeRobot export of the same 1,250 fixed-scene episodes the best CNN student used, with the same 1,125/125 split by episode. It gets the same 84x84 image, the same 21 numbers including the goal, and the instruction "pick up the cube and move it to the target". It outputs 50 actions at a time, and runs in the same 100-episode closed-loop eval as the CNN students.
+
+<details>
+<summary>Training setup and how SmolVLA runs in the eval</summary>
 
 I used LeRobot's default fine-tuning: the vision encoder stays frozen and only the action part of the model (about 100M parameters) is trained. 20,000 steps at batch size 64, about 4.5 passes over the data, took 4 hours 10 minutes on one RTX 3090. The training loss stopped improving after about 13,000 steps.
 
 SmolVLA needs newer packages than Isaac Lab, so it runs in its own process. The eval sends it the images and states over a local socket and gets back the actions. Everything else is the same 100-episode eval as before.
+
+</details>
 
 ### Results
 
@@ -217,7 +262,16 @@ SmolVLA needs newer packages than Isaac Lab, so it runs in its own process. The 
 | SmolVLA | 25 steps | 8% | 29.98 cm | 35.09 cm | 28% | 31% |
 | SmolVLA, vision encoder trained too | 10 steps | 26% | 23.29 cm | 24.63 cm | 47% | 48% |
 
+![One frame three ways: the 84x84 image, that image upscaled to 512x512 as SmolVLA sees it, and the scene rendered at 512x512, with the cube circled](results/resolution_comparison.png)
+
+The cube is only a few pixels in the 84x84 frame, and upscaling adds no detail.
+
 How often it replans barely matters. With the frozen encoder it never lifts the cube in most episodes. The last row is a second run, described below.
+
+Offline, against the teacher's actions on held-out frames, SmolVLA's error is about 5 times the CNN student's, and largest while the arm reaches for the cube.
+
+<details>
+<summary>Offline action error</summary>
 
 To see why, I compared both models with the teacher's actions on the 125 held-out episodes, every 5th frame (6,250 frames), with no simulator in the loop. The error is the mean squared error with each action dimension divided by its spread in the teacher's actions.
 
@@ -230,28 +284,49 @@ To see why, I compared both models with the teacher's actions on the 125 held-ou
 
 All three open and close the gripper at the right time on over 99.9% of frames. The gap is in the arm, and it is largest early in the episode. That is when the policy has to find the cube in the image, since its position is not in the state. Small errors there add up in closed loop: the arm arrives at the wrong place and misses the grasp.
 
-The CNN student finds the cube from the same 84x84 pixels, so the information is in the image. My guesses for why SmolVLA does not use it, most likely first:
+</details>
+
+The CNN student finds the cube from the same 84x84 pixels, so the information is in the image. My first guess for why SmolVLA does not use it is the frozen vision encoder seeing a blurry upscaled image.
+
+<details>
+<summary>All three guesses</summary>
+
+Most likely first:
 
 1. The image is far from what its vision encoder was trained on. SmolVLA scales each image up to 512x512. The cube covers only a few pixels of the 84x84 frame, and scaling up adds no detail. The encoder stays frozen, so it cannot adapt.
 2. The base model is set up for three cameras at 256x256 and a 6-number state. Here it gets one small camera and 21 numbers.
 3. Training was short, 4.5 passes over the data. Since the loss had flattened, I doubt more steps on the same data would change much.
 
+</details>
+
 ### Training the vision encoder too
 
-To test the first guess, I trained a second SmolVLA with the vision encoder unfrozen as well (186M trainable parameters). The language layers stayed frozen as before. LeRobot's own option for this also unfreezes the language layers, so I used a short wrapper that only changes the vision encoder. Batch size 64 did not fit in the GPU memory left next to another user's job, so this run used batch size 32 for 30,000 steps: 3.4 passes over the data, 6 hours 49 minutes.
+To test the first guess, I trained a second SmolVLA with the vision encoder unfrozen as well (186M trainable parameters).
 
-It reached 26% instead of 15%, and lifted the cube in 48% of episodes instead of 29%. With 100 episodes each, a difference of 11 points is at the edge of what I can tell apart from noise, and each number comes from one training run. Offline, its error went down only a little, about 14% overall, and it is still 5 times the CNN student's while reaching for the cube. The final training loss was the same as the frozen run's (0.025).
+<details>
+<summary>Setup of this run</summary>
+
+The language layers stayed frozen as before. LeRobot's own option for this also unfreezes the language layers, so I used a short wrapper that only changes the vision encoder. Batch size 64 did not fit in the GPU memory left next to another user's job, so this run used batch size 32 for 30,000 steps: 3.4 passes over the data, 6 hours 49 minutes. The final training loss was the same as the frozen run's (0.025).
+
+</details>
+
+It reached 26% instead of 15%, and lifted the cube in 48% of episodes instead of 29%. With 100 episodes and one training run each, an 11-point difference is at the edge of what I can tell apart from noise. Offline, its error went down only a little, about 14% overall, and it is still 5 times the CNN student's while reaching for the cube.
 
 My take: letting the encoder adapt helps somewhat, but it is not the main fix. The model still sees an 84x84 image scaled up to 512x512, and it still cannot locate the cube as well as a small CNN trained from scratch. Higher-resolution images are the obvious next test, and I have not run them.
 
-The results are in [`results/smolvla_1250_84/`](results/smolvla_1250_84/), [`results/smolvla_1250_84_replan1/`](results/smolvla_1250_84_replan1/), [`results/smolvla_1250_84_replan25/`](results/smolvla_1250_84_replan25/), [`results/smolvla_1250_84_vision/`](results/smolvla_1250_84_vision/), [`results/offline_action_check.json`](results/offline_action_check.json) and [`results/offline_action_check_vision.json`](results/offline_action_check_vision.json).
+<details>
+<summary>Result files</summary>
+
+The results are in [`results/smolvla_1250_84/`](results/smolvla_1250_84/), [`results/smolvla_1250_84_replan1/`](results/smolvla_1250_84_replan1/), [`results/smolvla_1250_84_replan25/`](results/smolvla_1250_84_replan25/), [`results/smolvla_1250_84_vision/`](results/smolvla_1250_84_vision/), [`results/offline_action_check.json`](results/offline_action_check.json) and [`results/offline_action_check_vision.json`](results/offline_action_check_vision.json). The figure comes from `scripts/render_resolution_frame.py` and `scripts/make_resolution_figure.py`.
+
+</details>
 
 ## Limitations
 
 - Everything is in simulation. The perturbations stand in for sim-to-real gaps.
 - Each policy comes from one training run with one seed, and each number from 100 episodes. Small differences are not meaningful.
-- Lighting and colors are now partly handled: the randomized ResNet-18 student keeps 53 to 81% under those changes, against 86% on the unchanged scene. I only randomized light intensity and flat cube and table colors, not textures, shadows or clutter, and the scene is otherwise plain.
-- Camera pose is still the main gap. The student drops to 46% with the camera moved 5 cm and 16% at 12 cm, so a real setup would need a carefully fixed camera or more work here.
+- Lighting and colors are now partly handled (53 to 81%, against 86% on the unchanged scene), but I only randomized light intensity and flat colors, not textures, shadows or clutter.
+- Camera pose is still the main gap: 46% with the camera moved 5 cm and 16% at 12 cm.
 - The student still gets exact joint readings and the goal as numbers. Only the cube has to come from the image.
 - SmolVLA was tested only with 84x84 images, one training run per setup. The result says these setups do not work, not that SmolVLA cannot do the task.
 
