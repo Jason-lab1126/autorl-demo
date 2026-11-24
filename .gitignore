@@ -34,3 +34,4 @@ media/raw/
 # Regenerable attribution rollouts (~100 MB): rerun scripts/attribute.py --phase run / check_replay_determinism.py
 results/attr/v2/replay/
 results/attr/determinism/
+results/attr/v3/replay/

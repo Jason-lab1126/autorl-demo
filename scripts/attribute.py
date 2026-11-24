@@ -38,6 +38,8 @@ the same std in N for the finger joints).
 Usage (from ~/autorl-demo after ``source env.sh``):
     python scripts/attribute.py --phase run --workers 4 --headless --device cuda:0
     python scripts/attribute.py --phase analyze
+v3 (adds training and out-of-hypothesis logs, and PhysX joint forces; evaluated by attribution_eval.py):
+    python scripts/attribute.py --phase run --suites test train other --out_dir results/attr/v3 --workers 8 --headless --device cuda:0
 Outputs in --out_dir (default results/attr/v2) and results/attr/attribution_v2.md, acc_vs_noise.png.
 """
 
@@ -55,38 +57,20 @@ ISAACLAB_PATH = os.environ.get("ISAACLAB_PATH", os.path.expanduser("~/IsaacLab")
 sys.path.append(os.path.join(ISAACLAB_PATH, "scripts", "reinforcement_learning", "rsl_rl"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cli_args  # noqa: E402  isort: skip
+from attr_common import (  # noqa: E402  isort: skip
+    ALL_SETTINGS, CANDIDATES, CLASSES, ENGINES, OTHER_SETTINGS, REAL_SETTINGS, REF_SETTING, TRAIN_SETTINGS,
+    new_rule, old_rule,
+)
 
-# real setting -> (perturbation, multiplier, engine, checkpoint iteration, true class)
-REAL_SETTINGS = {
-    "mass_x1.5": ("cube_mass", 1.5, "implicit", 1499, "H_theta-mass"),
-    "mass_x2.5": ("cube_mass", 2.5, "implicit", 1499, "H_theta-mass"),
-    "mass_x4": ("cube_mass", 4.0, "implicit", 1499, "H_theta-mass"),
-    "fric_x0.7": ("friction", 0.7, "implicit", 1499, "H_theta-friction"),
-    "fric_x0.4": ("friction", 0.4, "implicit", 1499, "H_theta-friction"),
-    "fric_x0.25": ("friction", 0.25, "implicit", 1499, "H_theta-friction"),
-    "policy_300": ("none", 1.0, "implicit", 300, "H_pi"),
-    "policy_500": ("none", 1.0, "implicit", 500, "H_pi"),
-    "engine_explicit": ("none", 1.0, "explicit", 1499, "H_nu"),
-}
-REF_SETTING = ("none", 1.0, "implicit", 1499, None)
-# candidate -> (perturbation, multiplier, engine, class)
-CANDIDATES = {
-    "nominal": ("none", 1.0, "implicit", "H_pi"),
-    "mass_x2": ("cube_mass", 2.0, "implicit", "H_theta-mass"),
-    "mass_x3": ("cube_mass", 3.0, "implicit", "H_theta-mass"),
-    "mass_x5": ("cube_mass", 5.0, "implicit", "H_theta-mass"),
-    "fric_x0.5": ("friction", 0.5, "implicit", "H_theta-friction"),
-    "fric_x0.3": ("friction", 0.3, "implicit", "H_theta-friction"),
-    "fric_x0.2": ("friction", 0.2, "implicit", "H_theta-friction"),
-    "numerics": ("none", 1.0, "explicit", "H_nu"),
-}
-CLASSES = ["H_theta-mass", "H_theta-friction", "H_nu", "H_pi"]
 
 parser = argparse.ArgumentParser(description="Inverse failure attribution by open-loop replay (v2).")
 parser.add_argument("--phase", type=str, required=True, choices=["run", "job", "analyze"])
 parser.add_argument("--job", type=str, default=None, help="(internal) JSON job spec for --phase job.")
 parser.add_argument("--workers", type=int, default=4, help="Parallel simulator processes for --phase run.")
-parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
+parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2], help="Seeds of the test and H_other logs.")
+parser.add_argument("--train_seeds", type=int, nargs="+", default=[3, 4, 5], help="Seeds of the training logs.")
+parser.add_argument("--suites", type=str, nargs="+", default=["test"], choices=["test", "train", "other"],
+                    help="Log suites to record and replay with --phase run.")
 parser.add_argument("--noise_levels", type=float, nargs="+", default=[0.0, 1.0, 2.0, 5.0])
 parser.add_argument("--q_noise", type=float, default=1e-3, help="Real-robot joint position noise std [rad].")
 parser.add_argument("--tau_noise", type=float, default=0.5, help="Real-robot torque noise std [N·m].")
@@ -104,11 +88,16 @@ import numpy as np  # noqa: E402
 from traj_metrics import add_sensor_noise, joint_sd, residual_per_env  # noqa: E402
 
 
-def batch_ids() -> dict[str, tuple[str, int]]:
-    """Anonymous batch id -> (setting, seed), in a fixed shuffled order."""
-    pairs = [(setting, seed) for setting in REAL_SETTINGS for seed in args_cli.seeds]
+def batch_ids(suite: str = "test") -> dict[str, tuple[str, int]]:
+    """Anonymous batch id -> (setting, seed), in a fixed shuffled order (b: test, t: train, o: other)."""
+    settings, seeds, prefix = {
+        "test": (REAL_SETTINGS, args_cli.seeds, "b"),
+        "train": (TRAIN_SETTINGS, args_cli.train_seeds, "t"),
+        "other": (OTHER_SETTINGS, args_cli.seeds, "o"),
+    }[suite]
+    pairs = [(setting, seed) for setting in settings for seed in seeds]
     order = np.random.default_rng(12345).permutation(len(pairs))
-    return {f"b{i:02d}": pairs[j] for i, j in enumerate(order)}
+    return {f"{prefix}{i:02d}": pairs[j] for i, j in enumerate(order)}
 
 
 def out_path(*parts) -> str:
@@ -123,11 +112,14 @@ def run_job(spec: dict):
     from lift_sim import LiftSim, load_traj, save_traj
 
     agent_cfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+    faults = {}
     if spec["kind"] == "record":
-        name, value, engine, it, _ = REF_SETTING if spec["setting"] == "ref" else REAL_SETTINGS[spec["setting"]]
+        setting = REF_SETTING if spec["setting"] == "ref" else ALL_SETTINGS[spec["setting"]]
+        name, value, engine, it = setting[:4]
+        faults = setting[5] if len(setting) > 5 else {}
     else:
         name, value, engine, _ = CANDIDATES[spec["cand"]]
-    sim = LiftSim(args_cli.task, args_cli.num_envs, args_cli.device, agent_cfg, explicit_actuators=engine == "explicit")
+    sim = LiftSim(args_cli.task, args_cli.num_envs, args_cli.device, agent_cfg, explicit_actuators=ENGINES[engine], **faults)
     if spec["kind"] == "record":
         policy = sim.load_policy(os.path.join(args_cli.run_dir, f"model_{it}.pt"))
         sim.apply_perturbation(name, value)
@@ -146,9 +138,12 @@ def run_job(spec: dict):
 
 def run_all():
     os.makedirs(args_cli.job_log_dir, exist_ok=True)
-    ids = batch_ids()
-    labels = {bid: {"setting": s, "seed": seed, "true_class": REAL_SETTINGS[s][4]} for bid, (s, seed) in ids.items()}
+    ids = {bid: pair for suite in args_cli.suites for bid, pair in batch_ids(suite).items()}
+    labels = {bid: {"setting": s, "seed": seed, "true_class": ALL_SETTINGS[s][4]} for bid, (s, seed) in ids.items()}
     os.makedirs(args_cli.out_dir, exist_ok=True)
+    if os.path.isfile(out_path("labels.json")):
+        with open(out_path("labels.json")) as f:
+            labels = {**json.load(f), **labels}
     with open(out_path("labels.json"), "w") as f:
         json.dump(labels, f, indent=2)
 
@@ -214,34 +209,10 @@ def noise_floor(level: float, sd_tau, sd_q, rng) -> tuple[np.ndarray, float, flo
     return floors, sigma2, threshold
 
 
-def logsumexp(x: np.ndarray) -> float:
-    m = np.max(x)
-    return -np.inf if m == -np.inf else m + np.log(np.exp(x - m).sum())
 
 
-def new_rule(res: dict, failed: bool, sigma2: float, threshold: float) -> dict:
-    log_l = {c: -r / (2.0 * sigma2) for c, r in res.items()}
-    class_ll = {}
-    for cls in CLASSES:
-        if cls == "H_pi":
-            class_ll[cls] = log_l["nominal"] if failed and res["nominal"] <= threshold else -np.inf
-        else:
-            members = np.array([log_l[c] for c in CANDIDATES if CANDIDATES[c][3] == cls])
-            class_ll[cls] = logsumexp(members) - np.log(len(members))
-    z = logsumexp(np.array(list(class_ll.values())))
-    return {cls: float(np.exp(ll - z)) for cls, ll in class_ll.items()}
 
 
-def old_rule(res: dict, failed: bool) -> dict:
-    r = np.array(list(res.values()))
-    temp = max(np.median(r), 1e-12)
-    post = np.exp(-(r - r.min()) / temp)
-    post /= post.sum()
-    out = {cls: 0.0 for cls in CLASSES + ["none"]}
-    for cand, p in zip(res, post):
-        cls = CANDIDATES[cand][3]
-        out[cls if cls != "H_pi" or failed else "none"] += p
-    return out
 
 
 def attribute() -> dict:

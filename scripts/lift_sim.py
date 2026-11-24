@@ -31,20 +31,38 @@ from traj_metrics import final_success
 
 FINGER_BODIES = "panda_.*finger"
 PREROLL_SEED = 1_000_003  # seed of the canonical pre-roll episode (see LiftSim.rollout)
-STATE_KEYS = ["joint_pos", "joint_vel", "applied_torque", "computed_torque", "cube_pos"]
+# tau_solver: PhysX's projected joint forces (get_dof_projected_joint_forces), the joint force the solver
+# actually transmits along each DOF; applied_torque is Isaac Lab's PD estimate under implicit actuators.
+STATE_KEYS = ["joint_pos", "joint_vel", "applied_torque", "computed_torque", "tau_solver", "cube_pos"]
+ARM_JOINTS = 7
 
 
 class LiftSim:
     def __init__(self, task: str, num_envs: int, device: str, agent_cfg, seed: int = 0,
-                 explicit_actuators: bool = False, enhanced_determinism: bool = False, preroll_steps: int = 0):
+                 explicit_actuators: bool | list[str] = False, enhanced_determinism: bool = False,
+                 preroll_steps: int = 0, q_bias: float = 0.0, action_delay: list[int] | None = None,
+                 gripper_effort_scale: float = 1.0):
+        """Injected faults (all off by default):
+        explicit_actuators   True for all actuator groups, or a list of groups, as explicit IdealPD
+        q_bias               constant offset [rad] on the measured arm joint positions: seen by the policy and
+                             written to the log, while the joint controllers act on the true state
+        action_delay         per-env delay in control steps (cycled over the envs); the robot executes the command
+                             from that many steps ago (zero action before that) while the log records the command
+        gripper_effort_scale multiplier on the finger drives' effort limit
+        """
         env_cfg = parse_env_cfg(task, device=device, num_envs=num_envs)
         env_cfg.seed = seed
         if explicit_actuators:
-            print(f"[lift_sim] explicit IdealPD actuators for {use_explicit_actuators(env_cfg)}")
+            groups = None if explicit_actuators is True else list(explicit_actuators)
+            print(f"[lift_sim] explicit IdealPD actuators for {use_explicit_actuators(env_cfg, groups)}")
+        if gripper_effort_scale != 1.0:
+            hand = env_cfg.scene.robot.actuators["panda_hand"]
+            env_cfg.scene.robot.actuators["panda_hand"] = hand.replace(effort_limit=hand.effort_limit * gripper_effort_scale)
         env_cfg.sim.physx.enable_enhanced_determinism = enhanced_determinism
         self.explicit_actuators = explicit_actuators
         self.enhanced_determinism = enhanced_determinism
         self.preroll_steps = preroll_steps
+        self.faults = {"q_bias": q_bias, "action_delay": action_delay or [0], "gripper_effort_scale": gripper_effort_scale}
         self._perturbation = ("none", 1.0)
 
         self.env = RslRlVecEnvWrapper(gym.make(task, cfg=env_cfg))
@@ -55,6 +73,15 @@ class LiftSim:
         self.cube = self.base_env.scene["object"]
         self.joint_names = np.array(self.robot.joint_names)
         self._all_ids_cpu = torch.arange(self.num_envs, dtype=torch.int32, device="cpu")
+        self._q_bias = torch.zeros(len(self.joint_names), device=self.device)
+        self._q_bias[:ARM_JOINTS] = q_bias
+        delays = action_delay or [0]
+        self._delay = torch.tensor([delays[i % len(delays)] for i in range(self.num_envs)], device=self.device)
+        # where the policy observation holds the joint positions (the lift task's "joint_pos" term)
+        obs_mgr = self.base_env.observation_manager
+        names, dims = obs_mgr.active_terms["policy"], obs_mgr.group_obs_term_dim["policy"]
+        start = sum(d[0] for d in dims[: names.index("joint_pos")])
+        self._obs_q = slice(start, start + ARM_JOINTS)
         self._setup_perturbations()
         self._setup_reset_hook()
 
@@ -103,10 +130,11 @@ class LiftSim:
 
     def _snapshot(self) -> dict[str, torch.Tensor]:
         return {
-            "joint_pos": self.robot.data.joint_pos.clone(),
+            "joint_pos": self.robot.data.joint_pos + self._q_bias,
             "joint_vel": self.robot.data.joint_vel.clone(),
             "applied_torque": self.robot.data.applied_torque.clone(),
             "computed_torque": self.robot.data.computed_torque.clone(),
+            "tau_solver": self.robot.root_physx_view.get_dof_projected_joint_forces().clone(),
             "cube_pos": (self.cube.data.root_pos_w - self.base_env.scene.env_origins).clone(),
         }
 
@@ -165,12 +193,26 @@ class LiftSim:
         actions_in = None if replay is None else torch.from_numpy(replay["action"]).to(self.device)
         max_steps = base_env.max_episode_length + 5 if replay is None else len(actions_in)
         log = {key: [] for key in STATE_KEYS + ["action", "alive"]}
+        max_delay = int(self._delay.max())
+        commands = []  # past commands, for the action delay
+        env_ids = torch.arange(self.num_envs, device=self.device)
         self._recording = True
         for t in range(max_steps):
-            actions = policy(obs) if replay is None else actions_in[t]
+            if replay is None:
+                if bool(self._q_bias.any()):
+                    obs = obs.clone()
+                    obs[:, self._obs_q] += self._q_bias[:ARM_JOINTS]
+                actions = policy(obs)
+            else:
+                actions = actions_in[t]
+            executed = actions
+            if replay is None and max_delay > 0:
+                commands.append(actions.clone())
+                history = torch.stack([torch.zeros_like(actions)] * max_delay + commands)  # index max_delay + t is now
+                executed = history[max_delay + t - self._delay, env_ids]
             alive = ~done
             reset_now[:] = False
-            obs, _, _, _ = env.step(actions)
+            obs, _, _, _ = env.step(executed)
             state = self._snapshot()
             for key in state:
                 state[key][reset_now] = self._pre_reset[key][reset_now]
@@ -194,6 +236,7 @@ class LiftSim:
         return {
             "joint_names": self.joint_names, "seed": seed, "explicit_actuators": self.explicit_actuators,
             "enhanced_determinism": self.enhanced_determinism, "preroll_steps": self.preroll_steps,
+            **{f"fault_{k}": np.asarray(v) for k, v in self.faults.items()},
         }
 
 
