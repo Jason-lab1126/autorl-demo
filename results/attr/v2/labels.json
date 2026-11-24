@@ -1,0 +1,137 @@
+{
+  "b00": {
+    "setting": "mass_x1.5",
+    "seed": 0,
+    "true_class": "H_theta-mass"
+  },
+  "b01": {
+    "setting": "fric_x0.4",
+    "seed": 0,
+    "true_class": "H_theta-friction"
+  },
+  "b02": {
+    "setting": "policy_300",
+    "seed": 2,
+    "true_class": "H_pi"
+  },
+  "b03": {
+    "setting": "mass_x4",
+    "seed": 0,
+    "true_class": "H_theta-mass"
+  },
+  "b04": {
+    "setting": "policy_300",
+    "seed": 1,
+    "true_class": "H_pi"
+  },
+  "b05": {
+    "setting": "policy_500",
+    "seed": 1,
+    "true_class": "H_pi"
+  },
+  "b06": {
+    "setting": "engine_explicit",
+    "seed": 0,
+    "true_class": "H_nu"
+  },
+  "b07": {
+    "setting": "policy_500",
+    "seed": 2,
+    "true_class": "H_pi"
+  },
+  "b08": {
+    "setting": "fric_x0.7",
+    "seed": 2,
+    "true_class": "H_theta-friction"
+  },
+  "b09": {
+    "setting": "mass_x1.5",
+    "seed": 1,
+    "true_class": "H_theta-mass"
+  },
+  "b10": {
+    "setting": "mass_x2.5",
+    "seed": 2,
+    "true_class": "H_theta-mass"
+  },
+  "b11": {
+    "setting": "fric_x0.7",
+    "seed": 1,
+    "true_class": "H_theta-friction"
+  },
+  "b12": {
+    "setting": "fric_x0.25",
+    "seed": 0,
+    "true_class": "H_theta-friction"
+  },
+  "b13": {
+    "setting": "fric_x0.7",
+    "seed": 0,
+    "true_class": "H_theta-friction"
+  },
+  "b14": {
+    "setting": "policy_300",
+    "seed": 0,
+    "true_class": "H_pi"
+  },
+  "b15": {
+    "setting": "engine_explicit",
+    "seed": 1,
+    "true_class": "H_nu"
+  },
+  "b16": {
+    "setting": "mass_x2.5",
+    "seed": 1,
+    "true_class": "H_theta-mass"
+  },
+  "b17": {
+    "setting": "fric_x0.25",
+    "seed": 2,
+    "true_class": "H_theta-friction"
+  },
+  "b18": {
+    "setting": "mass_x4",
+    "seed": 1,
+    "true_class": "H_theta-mass"
+  },
+  "b19": {
+    "setting": "mass_x2.5",
+    "seed": 0,
+    "true_class": "H_theta-mass"
+  },
+  "b20": {
+    "setting": "mass_x4",
+    "seed": 2,
+    "true_class": "H_theta-mass"
+  },
+  "b21": {
+    "setting": "engine_explicit",
+    "seed": 2,
+    "true_class": "H_nu"
+  },
+  "b22": {
+    "setting": "fric_x0.4",
+    "seed": 2,
+    "true_class": "H_theta-friction"
+  },
+  "b23": {
+    "setting": "fric_x0.25",
+    "seed": 1,
+    "true_class": "H_theta-friction"
+  },
+  "b24": {
+    "setting": "mass_x1.5",
+    "seed": 2,
+    "true_class": "H_theta-mass"
+  },
+  "b25": {
+    "setting": "policy_500",
+    "seed": 0,
+    "true_class": "H_pi"
+  },
+  "b26": {
+    "setting": "fric_x0.4",
+    "seed": 1,
+    "true_class": "H_theta-friction"
+  }
+}
