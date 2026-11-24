@@ -32,6 +32,7 @@ from isaaclab.app import AppLauncher
 
 ISAACLAB_PATH = os.environ.get("ISAACLAB_PATH", os.path.expanduser("~/IsaacLab"))
 sys.path.append(os.path.join(ISAACLAB_PATH, "scripts", "reinforcement_learning", "rsl_rl"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cli_args  # noqa: E402  isort: skip
 
 # cell name -> (perturbation, multiplier, replay nominal's actions open loop)
@@ -52,6 +53,11 @@ parser.add_argument("--num_envs", type=int, default=8, help="Episodes per cell (
 parser.add_argument("--threshold", type=float, default=0.02, help="Success radius [m].")
 parser.add_argument("--seed", type=int, default=0, help="Seed every cell is reset with.")
 parser.add_argument("--out_dir", type=str, default="results/traj")
+parser.add_argument("--cells", type=str, nargs="+", default=list(CELLS), choices=list(CELLS), help="Cells to run.")
+parser.add_argument(
+    "--explicit_actuators", type=str, nargs="*", default=None,
+    help="Use IdealPD actuators instead of implicit PhysX drives for these actuator groups (all if none given).",
+)
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
@@ -74,6 +80,8 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
 
+from explicit_actuators import use_explicit_actuators
+
 COMMAND_NAME = "object_pose"
 
 
@@ -81,6 +89,9 @@ def main():
     env_cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs)
     agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
     env_cfg.seed = args_cli.seed
+    if args_cli.explicit_actuators is not None:
+        groups = args_cli.explicit_actuators or None
+        print(f"[log_traj] explicit IdealPD actuators for {use_explicit_actuators(env_cfg, groups)}")
     checkpoint = os.path.abspath(args_cli.ckpt)
     if not os.path.isfile(checkpoint):
         raise FileNotFoundError(checkpoint)
@@ -198,7 +209,10 @@ def main():
     nominal = None
     joint_names = np.array(robot.joint_names)
     with torch.inference_mode():
-        for cell, (name, value, replay) in CELLS.items():
+        for cell in args_cli.cells:
+            name, value, replay = CELLS[cell]
+            if replay and nominal is None:
+                raise ValueError(f"{cell} replays nominal's actions, so nominal must be among --cells.")
             apply_perturbation(name, value)
             if replay:
                 data = run_cell(torch.from_numpy(nominal["action"]).to(device), torch.from_numpy(nominal["alive"]))
@@ -214,7 +228,7 @@ def main():
             np.savez(
                 os.path.join(args_cli.out_dir, f"{cell}.npz"),
                 **data, joint_names=joint_names, final_dist=final_dist, success=success,
-                perturbation=name, value=value, replay=replay, seed=args_cli.seed, checkpoint=checkpoint,
+                perturbation=name, value=value, replay=replay, explicit_actuators=str(args_cli.explicit_actuators), seed=args_cli.seed, checkpoint=checkpoint,
             )
             print(
                 f"[log_traj] {cell:<15} success@{args_cli.threshold * 100:g}cm {success.mean() * 100:5.1f}%"
@@ -223,7 +237,7 @@ def main():
                 flush=True,
             )
         apply_perturbation("none", 1.0)
-    print(f"[log_traj] wrote {len(CELLS)} cells to {args_cli.out_dir}")
+    print(f"[log_traj] wrote {len(args_cli.cells)} cells to {args_cli.out_dir}")
     env.close()
 
 

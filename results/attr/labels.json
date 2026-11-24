@@ -1,0 +1,22 @@
+{
+  "log_B": {
+    "cell": "real_engine",
+    "true_class": "H_nu",
+    "checkpoint_iter": 1499
+  },
+  "log_C": {
+    "cell": "real_mass",
+    "true_class": "H_theta-mass",
+    "checkpoint_iter": 1499
+  },
+  "log_A": {
+    "cell": "real_fric",
+    "true_class": "H_theta-friction",
+    "checkpoint_iter": 1499
+  },
+  "log_D": {
+    "cell": "real_policy",
+    "true_class": "H_pi",
+    "checkpoint_iter": 300
+  }
+}
