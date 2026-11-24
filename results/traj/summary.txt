@@ -1,0 +1,27 @@
+[plot_traj] wrote results/traj/torque_compare.png
+
+success rate (final cube-to-goal < 2 cm):
+  nominal         100.0%  (8/8)  mean final dist   0.39 cm
+  nominal_repeat  100.0%  (8/8)  mean final dist   0.39 cm
+  friction_x0.5   100.0%  (8/8)  mean final dist   0.38 cm
+  mass_x5          87.5%  (7/8)  mean final dist   9.27 cm
+  replay_fric0.5  100.0%  (8/8)  mean final dist   0.68 cm
+  replay_mass5      0.0%  (0/8)  mean final dist  18.64 cm
+
+mean |Δτ| vs nominal (applied_torque, steps where both are alive; arm N·m, fingers N):
+  cell             steps   joint1   joint2   joint3   joint4   joint5   joint6   joint7       f1       f2
+  nominal_repeat    2000    0.000    0.000    0.000    0.000    0.000    0.000    0.000    0.000    0.000
+  friction_x0.5     2000    0.206    0.301    0.214    0.188    0.127    0.153    0.019    3.682    5.105
+  mass_x5           1795    2.059    6.897    2.171    6.088    0.638    2.384    0.520    6.050    6.841
+  replay_fric0.5    2000    0.031    0.039    0.029    0.032    0.022    0.089    0.001    2.778    4.010
+  replay_mass5      1798    0.484    4.233    0.615    2.880    0.112    1.350    0.003    9.296   10.553
+
+determinism (nominal_repeat vs nominal, both-alive steps):
+  max |Δjoint_pos| = 0.000e+00
+  max |Δjoint_vel| = 0.000e+00
+  max |Δapplied_torque| = 0.000e+00
+  max |Δcomputed_torque| = 0.000e+00
+  max |Δaction| = 0.000e+00
+  max |Δcube_pos| = 0.000e+00
+  alive masks identical: True
+  => max |Δq| = 0.000e+00 rad: simulation is deterministic
