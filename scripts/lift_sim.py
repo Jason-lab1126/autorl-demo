@@ -41,7 +41,8 @@ class LiftSim:
     def __init__(self, task: str, num_envs: int, device: str, agent_cfg, seed: int = 0,
                  explicit_actuators: bool | list[str] = False, enhanced_determinism: bool = False,
                  preroll_steps: int = 0, q_bias: float = 0.0, action_delay: list[int] | None = None,
-                 gripper_effort_scale: float = 1.0, substep_scale: int = 1, solver_iter_scale: float = 1.0):
+                 gripper_effort_scale: float = 1.0, substep_scale: int = 1, solver_iter_scale: float = 1.0,
+                 robot_solver_iters: int | None = None, cube_solver_iters: int | None = None):
         """Injected faults (all off by default):
         explicit_actuators   True for all actuator groups, or a list of groups, as explicit IdealPD
         q_bias               constant offset [rad] on the measured arm joint positions: seen by the policy and
@@ -51,6 +52,7 @@ class LiftSim:
         gripper_effort_scale multiplier on the finger drives' effort limit
         substep_scale        physics steps per control step x this (physics dt / this, same control rate)
         solver_iter_scale    multiplier on the robot's and the cube's solver position iteration counts
+        robot_solver_iters / cube_solver_iters   absolute solver position iteration counts (override the scale)
         """
         env_cfg = parse_env_cfg(task, device=device, num_envs=num_envs)
         env_cfg.seed = seed
@@ -64,6 +66,10 @@ class LiftSim:
         if solver_iter_scale != 1.0:
             for props in (env_cfg.scene.robot.spawn.articulation_props, env_cfg.scene.object.spawn.rigid_props):
                 props.solver_position_iteration_count = max(1, round(props.solver_position_iteration_count * solver_iter_scale))
+        if robot_solver_iters is not None:
+            env_cfg.scene.robot.spawn.articulation_props.solver_position_iteration_count = int(robot_solver_iters)
+        if cube_solver_iters is not None:
+            env_cfg.scene.object.spawn.rigid_props.solver_position_iteration_count = int(cube_solver_iters)
         if gripper_effort_scale != 1.0:
             hand = env_cfg.scene.robot.actuators["panda_hand"]
             env_cfg.scene.robot.actuators["panda_hand"] = hand.replace(effort_limit=hand.effort_limit * gripper_effort_scale)

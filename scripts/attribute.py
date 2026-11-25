@@ -66,6 +66,8 @@ from attr_common import (  # noqa: E402  isort: skip
 parser = argparse.ArgumentParser(description="Inverse failure attribution by open-loop replay (v2).")
 parser.add_argument("--phase", type=str, required=True, choices=["run", "job", "analyze"])
 parser.add_argument("--job", type=str, default=None, help="(internal) JSON job spec for --phase job.")
+parser.add_argument("--jobs_file", type=str, default=None,
+                    help="--phase run: run the replay_cfg jobs listed in this JSON file instead of the suites.")
 parser.add_argument("--workers", type=int, default=4, help="Parallel simulator processes for --phase run.")
 parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2], help="Seeds of the test and H_other logs.")
 parser.add_argument("--train_seeds", type=int, nargs="+", default=[3, 4, 5], help="Seeds of the training logs.")
@@ -114,6 +116,22 @@ def run_job(spec: dict):
 
     agent_cfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
     faults = {}
+    if spec["kind"] == "replay_cfg":
+        # an arbitrary executable configuration (e.g. proposed by an LLM): LiftSim keyword arguments plus
+        # cube mass / friction multipliers
+        cfg = dict(spec["cfg"])
+        mass, fric = cfg.pop("cube_mass_scale", 1.0), cfg.pop("friction_scale", 1.0)
+        sim = LiftSim(args_cli.task, args_cli.num_envs, args_cli.device, agent_cfg, **cfg)
+        log = load_traj(spec["log_path"])
+        sim.apply_perturbation("mass_friction", (mass, fric))
+        traj = sim.rollout(int(log["seed"]), replay=log)
+        tmp = spec["out"][: -len(".npz")] + ".tmp.npz"
+        save_traj(tmp, traj, **sim.meta(int(log["seed"])), cfg_json=json.dumps(spec["cfg"], sort_keys=True))
+        os.replace(tmp, spec["out"])
+        print(f"[attribute] {spec['out']}", flush=True)
+        sim.env.close()
+        simulation_app.close()
+        return
     if spec["kind"] == "record":
         setting = REF_SETTING if spec["setting"] == "ref" else ALL_SETTINGS[spec["setting"]]
         name, value, engine, it = setting[:4]
@@ -141,6 +159,10 @@ def run_job(spec: dict):
 
 def run_all():
     os.makedirs(args_cli.job_log_dir, exist_ok=True)
+    if args_cli.jobs_file:
+        with open(args_cli.jobs_file) as f:
+            stages = (("replay_cfg", json.load(f)),)
+        return run_stages(stages)
     ids = {bid: pair for suite in args_cli.suites for bid, pair in batch_ids(suite).items()}
     labels = {bid: {"setting": s, "seed": seed, "true_class": ALL_SETTINGS[s][4]} for bid, (s, seed) in ids.items()}
     os.makedirs(args_cli.out_dir, exist_ok=True)
@@ -167,6 +189,11 @@ def run_all():
     ]
     for d in ("logs", "replay"):
         os.makedirs(out_path(d), exist_ok=True)
+    run_stages((("record", records), ("replay", replays)))
+
+
+def run_stages(stages):
+    """Runs each stage's jobs (skipping those whose output exists) on --workers single-rollout processes."""
     forward = ["--task", args_cli.task, "--num_envs", str(args_cli.num_envs), "--run_dir", args_cli.run_dir,
                "--out_dir", args_cli.out_dir, "--device", args_cli.device, "--headless"]
 
@@ -177,10 +204,11 @@ def run_all():
                 [sys.executable, os.path.abspath(__file__), "--phase", "job", "--job", json.dumps(spec)] + forward,
                 stdout=log_file, stderr=subprocess.STDOUT,
             )
-        ok = proc.returncode == 0 and os.path.isfile(spec["out"])
-        return name, ok
+        return name, proc.returncode == 0 and os.path.isfile(spec["out"])
 
-    for stage, jobs in (("record", records), ("replay", replays)):
+    for stage, jobs in stages:
+        for job in jobs:
+            os.makedirs(os.path.dirname(job["out"]), exist_ok=True)
         todo = [job for job in jobs if not os.path.isfile(job["out"])]
         start = time.time()
         print(f"[attribute] {stage}: {len(todo)} of {len(jobs)} jobs to run on {args_cli.workers} workers", flush=True)
