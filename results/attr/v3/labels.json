@@ -328,5 +328,185 @@
     "setting": "other_q_bias",
     "seed": 2,
     "true_class": "H_other"
+  },
+  "g00": {
+    "setting": "op_fric_x0.25",
+    "seed": 0,
+    "true_class": "H_theta-friction"
+  },
+  "g01": {
+    "setting": "compound_mass2.5_fric0.4",
+    "seed": 2,
+    "true_class": "H_theta-mass+friction"
+  },
+  "g02": {
+    "setting": "op_policy_obs1499",
+    "seed": 2,
+    "true_class": "H_pi"
+  },
+  "g03": {
+    "setting": "op_engine_explicit",
+    "seed": 0,
+    "true_class": "H_nu"
+  },
+  "g04": {
+    "setting": "op_nominal",
+    "seed": 0,
+    "true_class": "nominal_ref"
+  },
+  "g05": {
+    "setting": "op_fric_x0.7",
+    "seed": 0,
+    "true_class": "H_theta-friction"
+  },
+  "g06": {
+    "setting": "op_engine_explicit",
+    "seed": 2,
+    "true_class": "H_nu"
+  },
+  "g07": {
+    "setting": "op_fric_x0.25",
+    "seed": 1,
+    "true_class": "H_theta-friction"
+  },
+  "g08": {
+    "setting": "op_mass_x4",
+    "seed": 0,
+    "true_class": "H_theta-mass"
+  },
+  "g09": {
+    "setting": "nu_substeps_x2",
+    "seed": 1,
+    "true_class": "H_nu"
+  },
+  "g10": {
+    "setting": "nu_solver_iters_x0.25",
+    "seed": 1,
+    "true_class": "H_nu"
+  },
+  "g11": {
+    "setting": "op_fric_x0.25",
+    "seed": 2,
+    "true_class": "H_theta-friction"
+  },
+  "g12": {
+    "setting": "nu_solver_iters_x0.25",
+    "seed": 2,
+    "true_class": "H_nu"
+  },
+  "g13": {
+    "setting": "op_mass_x2.5",
+    "seed": 0,
+    "true_class": "H_theta-mass"
+  },
+  "g14": {
+    "setting": "compound_mass2.5_fric0.4",
+    "seed": 0,
+    "true_class": "H_theta-mass+friction"
+  },
+  "g15": {
+    "setting": "op_policy_obs1499",
+    "seed": 1,
+    "true_class": "H_pi"
+  },
+  "g16": {
+    "setting": "op_mass_x1.5",
+    "seed": 2,
+    "true_class": "H_theta-mass"
+  },
+  "g17": {
+    "setting": "op_nominal",
+    "seed": 1,
+    "true_class": "nominal_ref"
+  },
+  "g18": {
+    "setting": "op_mass_x4",
+    "seed": 2,
+    "true_class": "H_theta-mass"
+  },
+  "g19": {
+    "setting": "op_mass_x4",
+    "seed": 1,
+    "true_class": "H_theta-mass"
+  },
+  "g20": {
+    "setting": "op_fric_x0.4",
+    "seed": 0,
+    "true_class": "H_theta-friction"
+  },
+  "g21": {
+    "setting": "nu_substeps_x2",
+    "seed": 0,
+    "true_class": "H_nu"
+  },
+  "g22": {
+    "setting": "op_mass_x1.5",
+    "seed": 1,
+    "true_class": "H_theta-mass"
+  },
+  "g23": {
+    "setting": "op_fric_x0.4",
+    "seed": 2,
+    "true_class": "H_theta-friction"
+  },
+  "g24": {
+    "setting": "op_mass_x2.5",
+    "seed": 1,
+    "true_class": "H_theta-mass"
+  },
+  "g25": {
+    "setting": "op_mass_x1.5",
+    "seed": 0,
+    "true_class": "H_theta-mass"
+  },
+  "g26": {
+    "setting": "op_mass_x2.5",
+    "seed": 2,
+    "true_class": "H_theta-mass"
+  },
+  "g27": {
+    "setting": "compound_mass2.5_fric0.4",
+    "seed": 1,
+    "true_class": "H_theta-mass+friction"
+  },
+  "g28": {
+    "setting": "op_fric_x0.7",
+    "seed": 2,
+    "true_class": "H_theta-friction"
+  },
+  "g29": {
+    "setting": "op_fric_x0.4",
+    "seed": 1,
+    "true_class": "H_theta-friction"
+  },
+  "g30": {
+    "setting": "op_nominal",
+    "seed": 2,
+    "true_class": "nominal_ref"
+  },
+  "g31": {
+    "setting": "op_engine_explicit",
+    "seed": 1,
+    "true_class": "H_nu"
+  },
+  "g32": {
+    "setting": "op_policy_obs1499",
+    "seed": 0,
+    "true_class": "H_pi"
+  },
+  "g33": {
+    "setting": "nu_solver_iters_x0.25",
+    "seed": 0,
+    "true_class": "H_nu"
+  },
+  "g34": {
+    "setting": "op_fric_x0.7",
+    "seed": 1,
+    "true_class": "H_theta-friction"
+  },
+  "g35": {
+    "setting": "nu_substeps_x2",
+    "seed": 2,
+    "true_class": "H_nu"
   }
 }

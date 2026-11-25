@@ -41,9 +41,36 @@ OTHER_SETTINGS = {
     "other_grip_x0.5": ("none", 1.0, "implicit", 1499, "H_other", {"gripper_effort_scale": 0.5}),
     "other_grip_x0.25": ("none", 1.0, "implicit", 1499, "H_other", {"gripper_effort_scale": 0.25}),
 }
-ALL_SETTINGS = {**REAL_SETTINGS, **TRAIN_SETTINGS, **OTHER_SETTINGS}
+# generalisation logs (v4), never used for fitting. A checkpoint given as a string is a path under the
+# franka_lift log root; "nominal_ref" marks the reference rollouts of a new policy (no injected fault).
+OBS_NOISE_POLICY = "2026-10-13_17-10-08_ppo_obs_noise_resume/model_2999.pt"
+GEN_SETTINGS = {
+    # new policy (trained with observation noise), same fault types and intensities as the test logs
+    "op_nominal": ("none", 1.0, "implicit", OBS_NOISE_POLICY, "nominal_ref"),
+    "op_mass_x1.5": ("cube_mass", 1.5, "implicit", OBS_NOISE_POLICY, "H_theta-mass"),
+    "op_mass_x2.5": ("cube_mass", 2.5, "implicit", OBS_NOISE_POLICY, "H_theta-mass"),
+    "op_mass_x4": ("cube_mass", 4.0, "implicit", OBS_NOISE_POLICY, "H_theta-mass"),
+    "op_fric_x0.7": ("friction", 0.7, "implicit", OBS_NOISE_POLICY, "H_theta-friction"),
+    "op_fric_x0.4": ("friction", 0.4, "implicit", OBS_NOISE_POLICY, "H_theta-friction"),
+    "op_fric_x0.25": ("friction", 0.25, "implicit", OBS_NOISE_POLICY, "H_theta-friction"),
+    "op_policy_obs1499": ("none", 1.0, "implicit", "2026-10-13_16-36-46_ppo_obs_noise/model_1499.pt", "H_pi"),
+    "op_engine_explicit": ("none", 1.0, "explicit", OBS_NOISE_POLICY, "H_nu"),
+    # new numerics faults, baseline policy
+    "nu_substeps_x2": ("none", 1.0, "substeps_x2", 1499, "H_nu"),
+    "nu_solver_iters_x0.25": ("none", 1.0, "solver_iters_x0.25", 1499, "H_nu"),
+    # compound physics fault, baseline policy
+    "compound_mass2.5_fric0.4": ("mass_friction", (2.5, 0.4), "implicit", 1499, "H_theta-mass+friction"),
+}
+ALL_SETTINGS = {**REAL_SETTINGS, **TRAIN_SETTINGS, **OTHER_SETTINGS, **GEN_SETTINGS}
 REF_SETTING = ("none", 1.0, "implicit", 1499, None)
-ENGINES = {"implicit": False, "explicit": True, "explicit_arm": ["panda_shoulder", "panda_forearm"]}
+# engine -> LiftSim keyword arguments
+ENGINES = {
+    "implicit": {},
+    "explicit": {"explicit_actuators": True},
+    "explicit_arm": {"explicit_actuators": ["panda_shoulder", "panda_forearm"]},
+    "substeps_x2": {"substep_scale": 2},
+    "solver_iters_x0.25": {"solver_iter_scale": 0.25},
+}
 
 # candidate -> (perturbation, multiplier, engine, class)
 CANDIDATES = {

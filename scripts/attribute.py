@@ -58,7 +58,7 @@ sys.path.append(os.path.join(ISAACLAB_PATH, "scripts", "reinforcement_learning",
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cli_args  # noqa: E402  isort: skip
 from attr_common import (  # noqa: E402  isort: skip
-    ALL_SETTINGS, CANDIDATES, CLASSES, ENGINES, OTHER_SETTINGS, REAL_SETTINGS, REF_SETTING, TRAIN_SETTINGS,
+    ALL_SETTINGS, CANDIDATES, CLASSES, ENGINES, GEN_SETTINGS, OTHER_SETTINGS, REAL_SETTINGS, REF_SETTING, TRAIN_SETTINGS,
     new_rule, old_rule,
 )
 
@@ -69,7 +69,7 @@ parser.add_argument("--job", type=str, default=None, help="(internal) JSON job s
 parser.add_argument("--workers", type=int, default=4, help="Parallel simulator processes for --phase run.")
 parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2], help="Seeds of the test and H_other logs.")
 parser.add_argument("--train_seeds", type=int, nargs="+", default=[3, 4, 5], help="Seeds of the training logs.")
-parser.add_argument("--suites", type=str, nargs="+", default=["test"], choices=["test", "train", "other"],
+parser.add_argument("--suites", type=str, nargs="+", default=["test"], choices=["test", "train", "other", "gen"],
                     help="Log suites to record and replay with --phase run.")
 parser.add_argument("--noise_levels", type=float, nargs="+", default=[0.0, 1.0, 2.0, 5.0])
 parser.add_argument("--q_noise", type=float, default=1e-3, help="Real-robot joint position noise std [rad].")
@@ -89,11 +89,12 @@ from traj_metrics import add_sensor_noise, joint_sd, residual_per_env  # noqa: E
 
 
 def batch_ids(suite: str = "test") -> dict[str, tuple[str, int]]:
-    """Anonymous batch id -> (setting, seed), in a fixed shuffled order (b: test, t: train, o: other)."""
+    """Anonymous batch id -> (setting, seed), in a fixed shuffled order (b: test, t: train, o: other, g: gen)."""
     settings, seeds, prefix = {
         "test": (REAL_SETTINGS, args_cli.seeds, "b"),
         "train": (TRAIN_SETTINGS, args_cli.train_seeds, "t"),
         "other": (OTHER_SETTINGS, args_cli.seeds, "o"),
+        "gen": (GEN_SETTINGS, args_cli.seeds, "g"),
     }[suite]
     pairs = [(setting, seed) for setting in settings for seed in seeds]
     order = np.random.default_rng(12345).permutation(len(pairs))
@@ -119,9 +120,11 @@ def run_job(spec: dict):
         faults = setting[5] if len(setting) > 5 else {}
     else:
         name, value, engine, _ = CANDIDATES[spec["cand"]]
-    sim = LiftSim(args_cli.task, args_cli.num_envs, args_cli.device, agent_cfg, explicit_actuators=ENGINES[engine], **faults)
+    sim = LiftSim(args_cli.task, args_cli.num_envs, args_cli.device, agent_cfg, **ENGINES[engine], **faults)
     if spec["kind"] == "record":
-        policy = sim.load_policy(os.path.join(args_cli.run_dir, f"model_{it}.pt"))
+        ckpt = os.path.join(args_cli.run_dir, f"model_{it}.pt") if isinstance(it, int) else \
+            os.path.join(os.path.dirname(os.path.abspath(args_cli.run_dir)), it)
+        policy = sim.load_policy(ckpt)
         sim.apply_perturbation(name, value)
         traj = sim.rollout(spec["seed"], policy=policy)
     else:

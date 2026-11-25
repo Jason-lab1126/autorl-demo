@@ -41,7 +41,7 @@ class LiftSim:
     def __init__(self, task: str, num_envs: int, device: str, agent_cfg, seed: int = 0,
                  explicit_actuators: bool | list[str] = False, enhanced_determinism: bool = False,
                  preroll_steps: int = 0, q_bias: float = 0.0, action_delay: list[int] | None = None,
-                 gripper_effort_scale: float = 1.0):
+                 gripper_effort_scale: float = 1.0, substep_scale: int = 1, solver_iter_scale: float = 1.0):
         """Injected faults (all off by default):
         explicit_actuators   True for all actuator groups, or a list of groups, as explicit IdealPD
         q_bias               constant offset [rad] on the measured arm joint positions: seen by the policy and
@@ -49,12 +49,21 @@ class LiftSim:
         action_delay         per-env delay in control steps (cycled over the envs); the robot executes the command
                              from that many steps ago (zero action before that) while the log records the command
         gripper_effort_scale multiplier on the finger drives' effort limit
+        substep_scale        physics steps per control step x this (physics dt / this, same control rate)
+        solver_iter_scale    multiplier on the robot's and the cube's solver position iteration counts
         """
         env_cfg = parse_env_cfg(task, device=device, num_envs=num_envs)
         env_cfg.seed = seed
         if explicit_actuators:
             groups = None if explicit_actuators is True else list(explicit_actuators)
             print(f"[lift_sim] explicit IdealPD actuators for {use_explicit_actuators(env_cfg, groups)}")
+        if substep_scale != 1:
+            env_cfg.sim.dt /= substep_scale
+            env_cfg.decimation *= substep_scale
+            env_cfg.sim.render_interval = env_cfg.decimation
+        if solver_iter_scale != 1.0:
+            for props in (env_cfg.scene.robot.spawn.articulation_props, env_cfg.scene.object.spawn.rigid_props):
+                props.solver_position_iteration_count = max(1, round(props.solver_position_iteration_count * solver_iter_scale))
         if gripper_effort_scale != 1.0:
             hand = env_cfg.scene.robot.actuators["panda_hand"]
             env_cfg.scene.robot.actuators["panda_hand"] = hand.replace(effort_limit=hand.effort_limit * gripper_effort_scale)
@@ -109,13 +118,17 @@ class LiftSim:
         if not self.finger_shape_ids:
             raise RuntimeError(f"No collision shapes found on the gripper fingers {finger_names}.")
 
-    def apply_perturbation(self, name: str = "none", value: float = 1.0):
-        """Sets cube mass ("cube_mass") or cube+finger friction ("friction") to ``value`` x nominal; "none" restores."""
-        if name not in ("none", "cube_mass", "friction"):
+    def apply_perturbation(self, name: str = "none", value=1.0):
+        """Sets cube mass ("cube_mass") or cube+finger friction ("friction") to ``value`` x nominal, or both
+        ("mass_friction", value = (mass multiplier, friction multiplier)); "none" restores."""
+        if name not in ("none", "cube_mass", "friction", "mass_friction"):
             raise ValueError(f"Unknown perturbation {name}.")
         self._perturbation = (name, value)
-        mass_scale = value if name == "cube_mass" else 1.0
-        friction_scale = value if name == "friction" else 1.0
+        if name == "mass_friction":
+            mass_scale, friction_scale = value
+        else:
+            mass_scale = value if name == "cube_mass" else 1.0
+            friction_scale = value if name == "friction" else 1.0
         cube_view, ids = self.cube.root_physx_view, self._all_ids_cpu
         cube_view.set_masses(self.default_masses * mass_scale, ids)
         cube_view.set_inertias(self.default_inertias * mass_scale, ids)

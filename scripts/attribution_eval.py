@@ -53,7 +53,7 @@ parser.add_argument("--tau_noise", type=float, default=0.5)
 parser.add_argument("--other_quantile", type=float, default=95.0)
 parser.add_argument("--bootstrap", type=int, default=2000)
 parser.add_argument("--md", type=str, default="results/attr/attribution_v3.md")
-args = parser.parse_args()
+args, _ = parser.parse_known_args()  # importable by attribution_v4.py
 
 SIGNALS = {"q": None, "q+applied": "applied_torque", "q+solver": "tau_solver"}
 MAIN = "q+applied"
@@ -130,7 +130,7 @@ def build_features(noise_aware: bool):
         for e in range(log["alive"].shape[1]):
             failed = not bool(log["success"][e])
             episodes.append({
-                "batch": bid, "suite": {"b": "test", "t": "train", "o": "other"}[bid[0]], "env": e,
+                "batch": bid, "suite": {"b": "test", "t": "train", "o": "other", "g": "gen"}[bid[0]], "env": e,
                 "setting": labels[bid]["setting"], "true": labels[bid]["true_class"],
                 "failed": failed, "final_dist_cm": float(log["final_dist"][e] * 100),
                 "clean_nominal": float(clean_nom[e]),
@@ -208,10 +208,13 @@ def features(ep, level, floors):
     return np.concatenate([terms - floor, np.log1p(lv["dev_tau"]), np.log1p(lv["dev_q"]), [float(ep["failed"])]])
 
 
-def train_supervised(train_eps, level, floors, n_models=5):
+def train_supervised(train_eps, level, floors, n_models=5, feat=None):
+    """MLP ensemble on ``feat(ep)`` (default: replay-residual features). The returned predict(ep) gives a
+    label; predict.proba(ep) the class probabilities."""
     import torch
 
-    x = np.stack([features(ep, level, floors) for ep in train_eps]).astype(np.float32)
+    feat = feat or (lambda ep: features(ep, level, floors))
+    x = np.stack([feat(ep) for ep in train_eps]).astype(np.float32)
     y = np.array([CLASSES.index(ep["true"]) for ep in train_eps])
     mu, sd = x.mean(0), x.std(0) + 1e-6
     xt, yt = torch.from_numpy((x - mu) / sd), torch.from_numpy(y)
@@ -231,12 +234,15 @@ def train_supervised(train_eps, level, floors, n_models=5):
             opt.step()
         models.append(model.eval())
 
-    def predict(ep):
+    def proba(ep) -> np.ndarray:
         with torch.no_grad():
-            z = torch.from_numpy(((features(ep, level, floors) - mu) / sd).astype(np.float32))[None]
-            p = torch.stack([torch.softmax(m(z), dim=1) for m in models]).mean(0)[0]
-        return CLASSES[int(p.argmax())]
+            z = torch.from_numpy(((feat(ep) - mu) / sd).astype(np.float32))[None]
+            return torch.stack([torch.softmax(m(z), dim=1) for m in models]).mean(0)[0].numpy()
 
+    def predict(ep):
+        return CLASSES[int(proba(ep).argmax())]
+
+    predict.proba = proba
     return predict
 
 

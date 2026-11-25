@@ -29,12 +29,12 @@ def joint_sd(traj: dict, torque_key: str = "applied_torque") -> tuple[np.ndarray
 
 
 def residual_per_env(log: dict, rep: dict, sd_tau: np.ndarray, sd_q: np.ndarray,
-                     torque_key: str | None = "applied_torque") -> dict[str, np.ndarray]:
+                     torque_key: str | None = "applied_torque", torque_joints=None) -> dict[str, np.ndarray]:
     """Per-env residual of a replay against a log, over the steps where both are alive.
 
     residual = mean over steps of [ mean_j (dtau_j / sd_tau_j)^2 ] + mean over steps of [ mean_j (dq_j / sd_q_j)^2 ]
-    with tau = ``torque_key`` (None: joint positions only). Also returns the two terms and the coverage
-    (both-alive steps / log alive steps).
+    with tau = ``torque_key`` (None: joint positions only), averaged over ``torque_joints`` (default all).
+    Also returns the two terms and the coverage (both-alive steps / log alive steps).
     """
     steps = min(len(log["alive"]), len(rep["alive"]))
     mask = (log["alive"][:steps] & rep["alive"][:steps]).astype(float)  # (step, env)
@@ -42,7 +42,8 @@ def residual_per_env(log: dict, rep: dict, sd_tau: np.ndarray, sd_q: np.ndarray,
     if torque_key is None:
         z_tau = np.zeros(mask.shape)
     else:
-        z_tau = (((rep[torque_key][:steps] - log[torque_key][:steps]) / sd_tau) ** 2).mean(axis=2)
+        z_tau = ((rep[torque_key][:steps] - log[torque_key][:steps]) / sd_tau) ** 2
+        z_tau = (z_tau if torque_joints is None else z_tau[..., torque_joints]).mean(axis=2)
     z_q = (((rep["joint_pos"][:steps] - log["joint_pos"][:steps]) / sd_q) ** 2).mean(axis=2)
     tau_term = (z_tau * mask).sum(axis=0) / n
     q_term = (z_q * mask).sum(axis=0) / n
@@ -67,11 +68,12 @@ def first_divergence(a: dict, b: dict, keys=("joint_pos", "joint_vel", "applied_
 
 def add_sensor_noise(traj: dict, q_std: float, tau_std: float, rng: np.random.Generator,
                      torque_keys: tuple[str, ...] = ("applied_torque",)) -> dict:
-    """Copy of ``traj`` with Gaussian noise on the joint positions and on the given torque signals."""
+    """Copy of ``traj`` with Gaussian noise on the joint positions and on the given torque signals.
+    ``tau_std`` may be a per-joint array."""
     noisy = dict(traj)
     if q_std > 0.0:
         noisy["joint_pos"] = traj["joint_pos"] + rng.normal(0.0, q_std, traj["joint_pos"].shape)
-    for key in torque_keys if tau_std > 0.0 else ():
+    for key in torque_keys if np.any(np.asarray(tau_std) > 0.0) else ():
         if key in traj:
             noisy[key] = traj[key] + rng.normal(0.0, tau_std, traj[key].shape)
     return noisy
